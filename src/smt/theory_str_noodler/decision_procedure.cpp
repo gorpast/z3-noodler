@@ -1653,19 +1653,20 @@ namespace smt::noodler {
         // loop once through initial inclusion graph - now don't care about other created dependent predicates
         while (processed_count != init_predicate_size)
         {
+            Predicate predicate_to_process = process_state.predicates_to_process[processed_count++];
 
-            Predicate predicate_to_process = process_state.predicates_to_process.front();
-            process_state.predicates_to_process.pop_front();
+            STRACE(str, tout << "Processing: " << processed_count << "\n");
 
             // don't know what to do with transducers
             if (predicate_to_process.is_equation()) { // inclusion
-                process_inclusion_single_noodle(predicate_to_process, process_state);
+                // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
+                if (!process_inclusion_single_noodle(predicate_to_process, process_state)) {
+                    return;
+                }
             } else {
                 SASSERT(predicate_to_process.is_transducer());
             }
 
-            process_state.push_back_unique(predicate_to_process);
-            processed_count++;
         } 
 
         // pushing process state back - think it doesnt depend second argument
@@ -1673,7 +1674,88 @@ namespace smt::noodler {
 
     }
 
-    void DecisionProcedure::process_inclusion_single_noodle(Predicate &inclusion, SolvingState& solving_state) {
+    bool DecisionProcedure::process_inclusion_single_noodle(Predicate &inclusion, SolvingState& solving_state) {
+
+        // TODO - change these
+        const auto &left_side_vars = inclusion.get_left_side();
+        const auto &right_side_vars = inclusion.get_right_side();
+
+        // inclusion contains length aware variables can't od anything
+        if (solving_state.contains_length_var(right_side_vars) || solving_state.contains_length_var(left_side_vars)) {
+            return true;
+        }
+
+        // Get automata of the variables on the left side
+        STRACE(str_nfa, tout << "Left automata:" << std::endl);
+        auto [left_side_automata, left_side_division] = solving_state.get_automata_and_division_of_concatenation(left_side_vars, false);
+        SASSERT(left_side_division.size() == left_side_vars.size()); // each division should contain exactly one left variable
+        SASSERT(left_side_automata.size() == left_side_division.size()); // we have one automaton for each division
+
+        // Get automata of the variables on the right side, but we can group non-length-aware vars next to each other
+        // together. Each right side automaton corresponds to either concatenation of non-length-aware vars (vector of
+        // basic terms) or one lenght-aware var (vector of one basic term). Division then contains for each right
+        // side automaton the variables whose concatenation it represents.
+        STRACE(str_nfa, tout << "Right automata:" << std::endl);
+        auto [right_side_automata, right_side_division] = solving_state.get_automata_and_division_of_concatenation(right_side_vars, true);
+        SASSERT(right_side_automata.size() == right_side_division.size()); // we have one automaton for each division
+
+        // noodlification
+        auto noodles = mata::strings::seg_nfa::noodlify_for_equation(left_side_automata,
+                                                                    right_side_automata,
+                                                                    false,
+                                                                    {{"reduce", "forward"}});
+
+        // automata assignment for temporary storing unification of noodles
+        AutAssignment help_aut_positioning;
+        if (solving_state.substitution_map.size() != 0) STRACE(str, tout << "Subst map empy\n");
+        // unify languages from different noodles
+        for (const auto &noodle : noodles) {
+
+            // assignment that helps me find satisfiability of given noodle
+            AutAssignment tmp_automata;
+
+            for (size_t ind = 0; ind < noodle.size(); ind++) {
+
+                // if variable is not in tmp_automata - add it else create intersection with current value
+                if (tmp_automata.find(left_side_vars[noodle[ind].second[0]]) == tmp_automata.end())
+                {
+                    tmp_automata[left_side_vars[noodle[ind].second[0]]] = noodle[ind].first;
+                } else {
+                    tmp_automata.restrict_lang(left_side_vars[noodle[ind].second[0]], *noodle[ind].first);
+                }
+
+            }
+            
+            // if some variable has empty automat - invalid noodle
+            if (!tmp_automata.is_sat()) continue;
+            STRACE(str, tout << "Valid noodle\n");
+
+            // if is valid noodle - unify it with other noodles
+            for (const auto &key : tmp_automata) {
+                // adding variable if it doesn't exists
+                if (help_aut_positioning.find(key.first) == help_aut_positioning.end())
+                {
+                    help_aut_positioning[key.first] = key.second;
+                } else {
+                    help_aut_positioning[key.first]->unite_nondet_with(*key.second);
+                }
+            }
+            
+        }
+
+        // process automata we got from unifying noodles
+        for (size_t ind = 0; ind < left_side_vars.size(); ind++) {
+            // no automata assigned for given variable - only empty string automata
+            if (help_aut_positioning.find(left_side_vars[ind]) == help_aut_positioning.end()) {
+                STRACE(str, tout << "Found UNSAT in single noodle preprocessing\n");
+                return false;
+            }
+
+            solving_state.aut_ass.restrict_lang(left_side_vars[ind], *help_aut_positioning[left_side_vars[ind]]);
+
+        }
+
+        return true;
     }
 
     /**
@@ -1765,10 +1847,7 @@ namespace smt::noodler {
         // temmporary place for single noodle preprocessing
         // TODO: maybe change position, where it is executed ?
 
-        // not sure how it will behave with length variables - TODO
-        if (init_length_sensitive_vars.size() == 0) {
-            single_noodle_preprocess();
-        }
+        single_noodle_preprocess();
     }
 
     lbool DecisionProcedure::preprocess(PreprocessType opt, const BasicTermEqiv &len_eq_vars) {

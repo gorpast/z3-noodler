@@ -664,7 +664,20 @@ namespace smt::noodler {
          */
         void single_noodle_preprocess();
 
-        void process_inclusion_single_noodle(Predicate &inclusion, SolvingState& solving_state);
+        /**
+         * @brief Function used for processing inclusion in single noodle preprocessing
+         * Processing consists of creating noodles for given inclusion and
+         * unification of these noodles - unification means, that we unify languages from variables
+         * in satisfiable noodles
+         * Based on unification, variable languages are refined
+         * If any unification can be created returns false - UNSAT inclusion
+         * 
+         * @param inclusion Inclusion that will be processed
+         * @param solving_state Current solving state of the problem
+         * 
+         * @return false <-> found an UNSAT inclusion
+         */
+        bool process_inclusion_single_noodle(Predicate &inclusion, SolvingState& solving_state);
 
         ////////////////////////////////////////////////////////////////
         //////////////////// FOR MODEL GENERATION //////////////////////
