@@ -655,6 +655,17 @@ namespace smt::noodler {
          */
         Formula not_contains{};
 
+        /**
+         * @brief Preprocessing of given problem using similiar strategy as main procedure but without branching
+         * utilizes basic noodlification, but instead of branching to different solving states,
+         * creates union of the branches and continue with just one solving state
+         * ! overapproximates given language - when found UNSAT - is unsat !
+         * otherwise must continue with normal procedure, however possibly refined initial languages
+         */
+        void single_noodle_preprocess();
+
+        void process_inclusion_single_noodle(Predicate &inclusion, SolvingState& solving_state);
+
         ////////////////////////////////////////////////////////////////
         //////////////////// FOR MODEL GENERATION //////////////////////
         ////////////////////////////////////////////////////////////////

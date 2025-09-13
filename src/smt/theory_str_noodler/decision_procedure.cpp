@@ -1,4 +1,5 @@
 #include <queue>
+
 #include <utility>
 #include <algorithm>
 #include <functional>
@@ -1640,6 +1641,41 @@ namespace smt::noodler {
         return ca::get_lia_for_not_contains(proj_not_cont, this->solution.aut_ass, true);
     }
 
+    void DecisionProcedure::single_noodle_preprocess() {
+        STRACE(str, tout << "Single noodle preprocessing...\n");
+        SolvingState process_state = pop_from_worklist();
+
+        // probably can be done easier - I'm scared of altering current inclusion graph
+        int processed_count = 0;
+
+        int init_predicate_size = process_state.predicates_to_process.size();
+
+        // loop once through initial inclusion graph - now don't care about other created dependent predicates
+        while (processed_count != init_predicate_size)
+        {
+
+            Predicate predicate_to_process = process_state.predicates_to_process.front();
+            process_state.predicates_to_process.pop_front();
+
+            // don't know what to do with transducers
+            if (predicate_to_process.is_equation()) { // inclusion
+                process_inclusion_single_noodle(predicate_to_process, process_state);
+            } else {
+                SASSERT(predicate_to_process.is_transducer());
+            }
+
+            process_state.push_back_unique(predicate_to_process);
+            processed_count++;
+        } 
+
+        // pushing process state back - think it doesnt depend second argument
+        push_to_worklist(std::move(process_state), false);
+
+    }
+
+    void DecisionProcedure::process_inclusion_single_noodle(Predicate &inclusion, SolvingState& solving_state) {
+    }
+
     /**
      * @brief Creates initial inclusion graph according to the preprocessed instance.
      */
@@ -1725,6 +1761,14 @@ namespace smt::noodler {
 
         STRACE(str_noodle_dot, tout << "digraph Procedure {\ninit[shape=none, label=\"\"]\n";);
         push_to_worklist(std::move(init_solving_state), true);
+
+        // temmporary place for single noodle preprocessing
+        // TODO: maybe change position, where it is executed ?
+
+        // not sure how it will behave with length variables - TODO
+        if (init_length_sensitive_vars.size() == 0) {
+            single_noodle_preprocess();
+        }
     }
 
     lbool DecisionProcedure::preprocess(PreprocessType opt, const BasicTermEqiv &len_eq_vars) {
