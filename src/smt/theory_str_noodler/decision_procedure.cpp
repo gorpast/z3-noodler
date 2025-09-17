@@ -1666,14 +1666,15 @@ namespace smt::noodler {
         int init_predicate_size = process_state.predicates_to_process.size();
 
         // loop once through initial inclusion graph - now don't care about other created dependent predicates
-        while (processed_count != init_predicate_size)
+        for (int processed_count = 0; processed_count < init_predicate_size; processed_count++)
         {
-            Predicate predicate_to_process = process_state.predicates_to_process[processed_count++];
+            Predicate predicate_to_process = process_state.predicates_to_process[processed_count];
 
             STRACE(str, tout << "Processing: " << processed_count << "\n");
 
             // don't know what to do with transducers
             if (predicate_to_process.is_equation()) { // inclusion
+                // if (process_state.is_predicate_on_cycle(predicate_to_process)) continue;
                 // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
                 if (!process_inclusion_single_noodle(predicate_to_process, process_state)) {
                     return;
@@ -1691,7 +1692,6 @@ namespace smt::noodler {
 
     bool DecisionProcedure::process_inclusion_single_noodle(Predicate &inclusion, SolvingState& solving_state) {
 
-        // TODO - change these
         const auto &left_side_vars = inclusion.get_left_side();
         const auto &right_side_vars = inclusion.get_right_side();
 
@@ -1715,62 +1715,57 @@ namespace smt::noodler {
         SASSERT(right_side_automata.size() == right_side_division.size()); // we have one automaton for each division
 
         // noodlification
-        auto noodles = mata::strings::seg_nfa::noodlify_for_equation(left_side_automata,
+        auto noodles = mata::applications::strings::seg_nfa::noodlify_for_equation(left_side_automata,
                                                                     right_side_automata,
                                                                     false,
                                                                     {{"reduce", "forward"}});
 
+        // no valid noodle found
+        if (noodles.size() == 0)
+        {
+            STRACE(str, tout << "Found UNSAT in single noodle preprocessing\n");
+            return false;
+        }
+
         // automata assignment for temporary storing unification of noodles
-        AutAssignment help_aut_positioning;
-        if (solving_state.substitution_map.size() != 0) STRACE(str, tout << "Subst map empy\n");
+        AutAssignment united_noodles_aut;
+
         // unify languages from different noodles
         for (const auto &noodle : noodles) {
 
             // assignment that helps me find satisfiability of given noodle
-            AutAssignment tmp_automata;
+            AutAssignment tmp_automata = solving_state.aut_ass;
 
+            // get variable languages of given noodle
             for (size_t ind = 0; ind < noodle.size(); ind++) {
 
-                // if variable is not in tmp_automata - add it else create intersection with current value
-                if (tmp_automata.find(left_side_vars[noodle[ind].second[0]]) == tmp_automata.end())
-                {
-                    tmp_automata[left_side_vars[noodle[ind].second[0]]] = noodle[ind].first;
-                } else {
-                    tmp_automata.restrict_lang(left_side_vars[noodle[ind].second[0]], *noodle[ind].first);
-                }
-
+                tmp_automata.restrict_lang(left_side_vars[noodle[ind].second[0]], *noodle[ind].first);
             }
             
-            // if some variable has empty automat - invalid noodle
-            if (!tmp_automata.is_sat()) continue;
-            STRACE(str, tout << "Valid noodle\n");
-
-            // if is valid noodle - unify it with other noodles
+            // unify it with other noodles - TODO make it better
             for (const auto &key : tmp_automata) {
                 // adding variable if it doesn't exists
-                if (help_aut_positioning.find(key.first) == help_aut_positioning.end())
+                if (united_noodles_aut.find(key.first) == united_noodles_aut.end())
                 {
-                    help_aut_positioning[key.first] = key.second;
+                    united_noodles_aut[key.first] = key.second;
                 } else {
-                    help_aut_positioning[key.first]->unite_nondet_with(*key.second);
+                    united_noodles_aut[key.first]->unite_nondet_with(*key.second);
                 }
             }
+
+            united_noodles_aut.reduce();
             
         }
 
         // process automata we got from unifying noodles
         for (size_t ind = 0; ind < left_side_vars.size(); ind++) {
-            // no automata assigned for given variable - only empty string automata
-            if (help_aut_positioning.find(left_side_vars[ind]) == help_aut_positioning.end()) {
-                STRACE(str, tout << "Found UNSAT in single noodle preprocessing\n");
-                return false;
-            }
 
-            solving_state.aut_ass.restrict_lang(left_side_vars[ind], *help_aut_positioning[left_side_vars[ind]]);
+            solving_state.aut_ass.restrict_lang(left_side_vars[ind], *united_noodles_aut[left_side_vars[ind]]);
 
         }
 
-        return true;
+        // check if every variable has non empty language
+        return solving_state.aut_ass.is_sat();
     }
 
     /**
@@ -1863,7 +1858,6 @@ namespace smt::noodler {
         push_to_worklist(std::move(init_solving_state), true);
 
         // temmporary place for single noodle preprocessing
-        // TODO: maybe change position, where it is executed ?
 
         single_noodle_preprocess();
     }
