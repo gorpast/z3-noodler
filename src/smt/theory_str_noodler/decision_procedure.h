@@ -341,6 +341,9 @@ namespace smt::noodler {
          */
         void substitute_vars(const std::set<BasicTerm>& vars_to_substitute);
 
+        /// @brief Remove vars @p vars_to_remove (except those in @p vars_to_keep ) from the subtitution_map/aut_ass
+        void remove_vars(const std::set<BasicTerm>& vars_to_remove, const std::set<BasicTerm>& vars_to_keep);
+
         /**
          * @brief Get the length constraints for variable @p var
          * 
@@ -409,7 +412,7 @@ namespace smt::noodler {
          * @brief Processes inclusions from noodlification that are of the form where the right side var should be substituted by left side.
          * 
          * It assumes that left sides contain fresh variables, right sides are not substituted yet and all inclusions hold.
-         * This function then takes each inclusions t_1 t_2 ... t_n ⊆ x where x is length var  and substitutes substitution_map[x] = t_1 t_2 ... t_n.
+         * This function then takes each inclusions t_1 t_2 ... t_n ⊆ x where x is length var and substitutes substitution_map[x] = t_1 t_2 ... t_n.
          * It is possible that x is on the right side of two inclusions, the first one substitutes it and the second one is added into this SolvingState
          * and also it is added for processing.
          * There can be inclusions t_1 t_2 ... t_n ⊆ x y ... z where there are multiple variables on the right side, but all the variables on the right
@@ -419,8 +422,9 @@ namespace smt::noodler {
          * 
          * @param inclusions Inclusion to process
          * @param on_cycle Whether the inclusions should be on cycle or not
+         * @return std::set<BasicTerm> The set of variables that were substituted
          */
-        void process_substituting_inclusions_from_right(const std::vector<Predicate>& inclusions, bool on_cycle);
+        std::set<BasicTerm> process_substituting_inclusions_from_right(const std::vector<Predicate>& inclusions, bool on_cycle);
 
         /**
          * @brief Similar to process_substituting_inclusions_from_right but opposite (left var should be substituted by right side).
@@ -438,8 +442,9 @@ namespace smt::noodler {
          * 
          * @param inclusions Inclusions to process
          * @param on_cycle Whether the inclusions should be on cycle or not
+         * @return std::set<BasicTerm> The set of variables that were substituted
          */
-        void process_substituting_inclusions_from_left(const std::vector<Predicate>& inclusions, bool on_cycle);
+        std::set<BasicTerm> process_substituting_inclusions_from_left(const std::vector<Predicate>& inclusions, bool on_cycle);
 
 
         /**
@@ -477,6 +482,8 @@ namespace smt::noodler {
 
         // a deque containing states of decision procedure, each of them can lead to a solution
         std::deque<SolvingState> worklist;
+        // if a solving state has nothing to process, it can lead to solution, we keep these solving states here instead of worklist so we can process them immediately
+        std::vector<SolvingState> possible_solutions;
 
         /// State of a found satisfiable solution set when one is computed using
         ///  compute_next_solution() or after preprocess()
@@ -489,6 +496,7 @@ namespace smt::noodler {
         std::unordered_map<BasicTerm, std::vector<BasicTerm>> init_substitution_map;
         // contains to/from_code/int conversions
         std::vector<TermConversion> conversions;
+        ast_manager& m;
 
         // length vars that occur as input/output of some transducer formula
         std::set<BasicTerm> length_vars_with_transducers;
@@ -511,6 +519,12 @@ namespace smt::noodler {
 
         const theory_str_noodler_params& m_params;
 
+        /// @brief We save here all string variables that exist before the decision procedure is run (useful for removing variables created in decision procedure, @sa SolvingState::remove_vars())
+        std::set<BasicTerm> initial_variables;
+
+        /// @brief Sets the initial_variables by adding all variables from @p f and other stuff (init_aut_ass, init_length_sensitive_vars, conversions, inclusions_from_preprocessing)
+        void set_initial_variables(const Formula& f);
+
         /**
          * @brief Replace disequality L != R with equalities and a length constraint saved in disequations_len_formula_conjuncts.
          * 
@@ -522,21 +536,35 @@ namespace smt::noodler {
         void process_inclusion(const Predicate& inclusion_to_process, SolvingState& solving_state);
         void process_transducer(const Predicate& transducer_to_process, SolvingState& solving_state);
 
+        bool is_worklist_empty() {
+            return (worklist.empty() && possible_solutions.empty());
+        }
+
         void push_to_worklist(SolvingState solving_state, bool to_back) {
             std::string old_DOT_name = solving_state.DOT_name;
             solving_state.set_new_DOT_name();
             STRACE(str_noodle_dot, tout << solving_state.print_to_DOT() << std::endl << old_DOT_name << " -> " << solving_state.DOT_name << ";\n");
-            if (to_back) {
-                worklist.push_back(std::move(solving_state));
+            if (solving_state.predicates_to_process.empty()) {
+                possible_solutions.push_back(std::move(solving_state));
             } else {
-                worklist.push_front(std::move(solving_state));
+                if (to_back) {
+                    worklist.push_back(std::move(solving_state));
+                } else {
+                    worklist.push_front(std::move(solving_state));
+                }
             }
         }
 
         unsigned num_of_popped_elements = 0;
         SolvingState pop_from_worklist() {
-            SolvingState element_to_process = std::move(worklist.front());
-            worklist.pop_front();
+            SolvingState element_to_process;
+            if (!possible_solutions.empty()) {
+                element_to_process = std::move(possible_solutions.back());
+                possible_solutions.pop_back();
+            } else {
+                element_to_process = std::move(worklist.front());
+                worklist.pop_front();
+            }
             STRACE(str_noodle_dot, tout << element_to_process.DOT_name << " -> " << element_to_process.DOT_name << " [penwidth=0,dir=none,label=" << num_of_popped_elements << "];\n";);
             ++num_of_popped_elements;
             return element_to_process;
@@ -737,13 +765,14 @@ namespace smt::noodler {
              Formula formula, AutAssignment init_aut_ass,
              std::unordered_set<BasicTerm> init_length_sensitive_vars,
              const theory_str_noodler_params &par,
-             std::vector<TermConversion> conversions
+             std::vector<TermConversion> conversions,
+             ast_manager& m
         ) : init_length_sensitive_vars(init_length_sensitive_vars),
             formula(formula),
             init_aut_ass(init_aut_ass),
             conversions(conversions),
+            m(m),
             m_params(par) {
-            
         }
         
         /**

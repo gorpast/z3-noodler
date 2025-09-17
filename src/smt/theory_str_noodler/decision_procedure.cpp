@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <functional>
 
-#include <mata/nfa/strings.hh>
+#include <mata/applications/strings.hh>
 #include "util.h"
 #include "aut_assignment.h"
 #include "decision_procedure.h"
@@ -70,6 +70,20 @@ namespace smt::noodler {
             }
         }
         predicates_to_process = new_predicates_to_process;
+
+        for (auto& [subst_var, substitution] : substitution_map) {
+            substitution = substitute_vector(substitution);
+        }
+    }
+
+    void SolvingState::remove_vars(const std::set<BasicTerm>& vars_to_remove, const std::set<BasicTerm>& vars_to_keep) {
+        for (const BasicTerm& var : vars_to_remove) {
+            if (!vars_to_keep.contains(var)) {
+                substitution_map.erase(var);
+                length_sensitive_vars.erase(var);
+                aut_ass.erase(var);
+            }
+        }
     }
 
     LenNode SolvingState::get_lengths(const BasicTerm& var) const {
@@ -192,7 +206,7 @@ namespace smt::noodler {
         return std::make_pair<std::vector<std::shared_ptr<mata::nfa::Nfa>>,std::vector<std::vector<BasicTerm>>>(std::move(automata_for_concatenation), std::move(divisions));
     }
 
-    void SolvingState::process_substituting_inclusions_from_right(const std::vector<Predicate>& inclusions, bool on_cycle) {
+    std::set<BasicTerm> SolvingState::process_substituting_inclusions_from_right(const std::vector<Predicate>& inclusions, bool on_cycle) {
         std::set<BasicTerm> newly_substituted_vars;
         for (const Predicate& inclusion : inclusions) {
             SASSERT(inclusion.is_equation());
@@ -229,10 +243,12 @@ namespace smt::noodler {
         push_non_simple_transducers_to_processing();
         // note that we do not need to add any inclusions into processing here, as all inclusions that had a variable from newly_substituted_vars
         // on the right side must have been in the queue already, otherwise it would have to be processed and substituted before
+
+        return newly_substituted_vars;
     }
 
 
-    void SolvingState::process_substituting_inclusions_from_left(const std::vector<Predicate>& inclusions, bool on_cycle) {
+    std::set<BasicTerm> SolvingState::process_substituting_inclusions_from_left(const std::vector<Predicate>& inclusions, bool on_cycle) {
         std::set<BasicTerm> newly_substituted_vars;
         for (const Predicate& inclusion : inclusions) {
             SASSERT(inclusion.is_equation());
@@ -263,6 +279,8 @@ namespace smt::noodler {
         substitute_vars(newly_substituted_vars);
         // some simple transducers could possibly become non-simple after substitution, we need to readd them for processing
         push_non_simple_transducers_to_processing();
+
+        return newly_substituted_vars;
     }
 
     BasicTerm SolvingState::add_fresh_var(std::shared_ptr<mata::nfa::Nfa> nfa, std::string var_prefix, bool is_length, bool optimize_literal) {
@@ -311,73 +329,59 @@ namespace smt::noodler {
             }
             return res.str();
         };
-
-        auto print_predicate_container_to_DOT = [&print_predicate_to_DOT]<typename T>(T predicate_container) {
+        
+        auto print_strings = [](std::vector<std::string>& strings, bool order, std::string del = "\\n") {
+            if (order) {
+                std::sort(strings.begin(), strings.end());
+            }
             bool first = true;
             std::ostringstream res;
-            for (const Predicate& pred : predicate_container) {
+            for (const std::string& string : strings) {
                 if (first) {
                     first = false;
-                    res << print_predicate_to_DOT(pred);
+                    res << string;
                 } else {
-                    res << "\\n" << print_predicate_to_DOT(pred);
+                    res << del << string;
                 }
             }
             return res.str(); 
         };
 
+        auto print_predicate_container_to_DOT = [&print_predicate_to_DOT, &print_strings]<typename T>(const T& predicate_container, bool order) {
+            std::vector<std::string> predicate_strings(predicate_container.size());
+            std::transform(predicate_container.begin(), predicate_container.end(), predicate_strings.begin(), print_predicate_to_DOT);
+            return print_strings(predicate_strings, order);
+        };
 
-        auto print_vars_to_DOT = [&escape_DOT_string](const std::vector<BasicTerm>& vars) {
-            bool first = true;
-            std::ostringstream res;
-            for (const BasicTerm& var : vars) {
-                if (first) {
-                    first = false;
-                    res << escape_DOT_string(var.to_string());
-                } else {
-                    res << "\\n" << escape_DOT_string(var.to_string());
-                }
-            }
-            return res.str(); 
+
+        auto print_vars_to_DOT = [&escape_DOT_string, &print_strings]<typename T>(const T& vars, bool order, bool delimit_by_space) {
+            std::vector<std::string> var_names(vars.size());
+            std::transform(vars.begin(), vars.end(), var_names.begin(), [&escape_DOT_string](const BasicTerm& var) { return escape_DOT_string(var.to_string());});
+            return print_strings(var_names, order, (delimit_by_space ? "\\ " : "\\n"));
         };
 
         std::ostringstream res;
-        res << DOT_name << "[shape=record,label=\"" << print_predicate_container_to_DOT(inclusions);
+        res << DOT_name << "[shape=record,label=\"" << print_predicate_container_to_DOT(inclusions, true);
         if (!inclusions.empty() && !transducers.empty()) {
             res << "\\n";
         }
-        res << print_predicate_container_to_DOT(transducers) << "|" << print_predicate_container_to_DOT(predicates_to_process) << "|";
+        res << print_predicate_container_to_DOT(transducers, true) << "|" << print_predicate_container_to_DOT(predicates_to_process, false) << "|";
 
-        bool first = true;
+        std::vector<std::string> strings_to_print;
         for (const auto& [var,subst_vars] : substitution_map) {
-            if (first) {
-                first = false;
-                res << escape_DOT_string(var.to_string()) << "\\ -\\>\\ " << print_vars_to_DOT(subst_vars);
-            } else {
-                res << "\\n" << escape_DOT_string(var.to_string()) << "\\ -\\>\\ " << print_vars_to_DOT(subst_vars);
-            }
+            strings_to_print.push_back(escape_DOT_string(var.to_string()) + std::string("\\ -\\>\\ ") + print_vars_to_DOT(subst_vars, false, true));
         }
         for (const BasicTerm& var : aut_ass.get_keys()) {
-            if (var.is_literal()) { continue; }
-            if (first) {
-                first = false;
-                res << escape_DOT_string(var.to_string()) << "\\ -\\>\\ NFA";
-            } else {
-                res << "\\n" << escape_DOT_string(var.to_string()) << "\\ -\\>\\ NFA";
+            if (!var.is_literal()) { 
+                strings_to_print.push_back(escape_DOT_string(var.to_string()) + std::string("\\ -\\>\\ NFA"));
             }
         }
+        res << print_strings(strings_to_print, true);
 
         res << "|";
 
-        first = true;
-        for (const BasicTerm& var : length_sensitive_vars) {
-            if (first) {
-                first = false;
-                res << escape_DOT_string(var.to_string());
-            } else {
-                res << "\\n" << escape_DOT_string(var.to_string());
-            }
-        }
+        res << print_vars_to_DOT(length_sensitive_vars, true, false);
+
         res << "\"];";
         return res.str();
     }
@@ -389,7 +393,8 @@ namespace smt::noodler {
                            << "Getting another solution"
                            << "------------------------" << std::endl;);
 
-        while (!worklist.empty()) {
+        while (!is_worklist_empty()) {
+            util::check_limit(m);
             SolvingState element_to_process = pop_from_worklist();
 
             if (element_to_process.predicates_to_process.empty()) {
@@ -489,6 +494,7 @@ namespace smt::noodler {
                 solving_state.push_dependent_predicates(non_empty_side_vars, is_inclusion_to_process_on_cycle);
             }
             solving_state.substitute_vars(non_empty_side_vars); // we need to substitute the variables in other predicates
+            solving_state.remove_vars(non_empty_side_vars, initial_variables); // remove unneccesary variables that were substituted
             // it is possible that some transducer become non-simple (one of its side becomes empty), we want to process these again
             solving_state.push_non_simple_transducers_to_processing();
 
@@ -561,12 +567,13 @@ namespace smt::noodler {
          * i_l-th left var (i.e. left_side_vars[i_l]) and the second element i_r = noodle[i].second[1] tell us that
          * it belongs to the i_r-th division of the right side (i.e. right_side_division[i_r])
          **/
-        auto noodles = mata::strings::seg_nfa::noodlify_for_equation(left_side_automata,
+        auto noodles = mata::applications::strings::seg_nfa::noodlify_for_equation(left_side_automata,
                                                                     right_side_automata,
                                                                     false,
                                                                     {{"reduce", "forward"}});
 
         for (const auto &noodle : noodles) {
+            util::check_limit(m);
             STRACE(str, tout << "Processing noodle" << (is_trace_enabled(TraceTag::str_nfa) ? " with automata:" : "") << std::endl;);
             SolvingState new_element = solving_state;
 
@@ -612,7 +619,7 @@ namespace smt::noodler {
              * because they are length-aware vars and we only add the inclusion t_6 ⊆ x_5 x_6.
              * The following function does this and it also add new inclusions/transducers to processing if needed.
              */
-            new_element.process_substituting_inclusions_from_right(right_side_inclusions, is_inclusion_to_process_on_cycle);
+            std::set<BasicTerm> newly_substituted_vars_from_right = new_element.process_substituting_inclusions_from_right(right_side_inclusions, is_inclusion_to_process_on_cycle);
 
             /* Following the example from before, the following will create these inclusions from the left side:
              *           x_1 ⊆ t_1
@@ -630,7 +637,11 @@ namespace smt::noodler {
              * and we only add inclusions x_1 ⊆ t_1 and t_2 t_3 ⊆ t_5 t_6.
              * The following function does this and it also add new inclusions/transducers to processing if needed.
              */
-            new_element.process_substituting_inclusions_from_left(left_side_inclusions, is_inclusion_to_process_on_cycle);
+            std::set<BasicTerm> newly_substituted_vars_from_left = new_element.process_substituting_inclusions_from_left(left_side_inclusions, is_inclusion_to_process_on_cycle);
+
+            // Remove unneccesary variables that were substituted (we do it here, because we the code before depends on the newly substituted vars to be in subtitution_map)
+            new_element.remove_vars(newly_substituted_vars_from_right, initial_variables); // remove unneccesary variables that were substituted
+            new_element.remove_vars(newly_substituted_vars_from_left, initial_variables); // remove unneccesary variables that were substituted
 
             // we push to front when the inclusion is not on cycle, because we want to get to the result as fast as possible
             // and if there is no cycle, we do not need to do BFS, the algorithm should end
@@ -710,7 +721,7 @@ namespace smt::noodler {
 
             // we create new inclusion, either output_var ⊆ application_to_literal or application_to_literal ⊆ input_vars
             Predicate new_inclusion = input_is_literal ? Predicate::create_equation(non_literal_side, {}) : Predicate::create_equation({}, non_literal_side);
-            if (!mata::strings::is_lang_eps(application_to_literal)) {
+            if (!mata::applications::strings::is_lang_eps(application_to_literal)) {
                 // if the application does not lead to empty string we need to create a new var for literal side and replace it with its language set to application_to_literal
                 BasicTerm fresh_var = solving_state.add_fresh_var(std::make_shared<mata::nfa::Nfa>(application_to_literal), std::string("literalsideapp_") + std::to_string(noodlification_no), false, true);
                 if (input_is_literal) {
@@ -734,8 +745,9 @@ namespace smt::noodler {
         SASSERT(output_vars_automata.size() == output_vars_divisions.size());
         SASSERT(output_vars_divisions.size() == output_vars.size());
 
-        std::vector<mata::strings::seg_nfa::TransducerNoodle> noodles = mata::strings::seg_nfa::noodlify_for_transducer(transducer_to_process.get_transducer(), input_vars_automata, output_vars_automata, true);
+        std::vector<mata::applications::strings::seg_nfa::TransducerNoodle> noodles = mata::applications::strings::seg_nfa::noodlify_for_transducer(transducer_to_process.get_transducer(), input_vars_automata, output_vars_automata, true);
         for (const auto& noodle : noodles) {
+            util::check_limit(m);
             // each noodle is a vector of tuples (T,i,Ai,o,Ao) where
             //      - T is a transducer, which will take one input and one output var: xo = T(xi)
             //      - i is the number denoting which input variable is connected with T
@@ -785,10 +797,14 @@ namespace smt::noodler {
             }
 
             std::vector<Predicate> input_inclusions = util::create_inclusions_from_multiple_sides(input_vars_to_new_input_vars, input_vars_divisions);
-            new_element.process_substituting_inclusions_from_right(input_inclusions, false);
+            std::set<BasicTerm> newly_substituted_vars_from_right = new_element.process_substituting_inclusions_from_right(input_inclusions, false);
 
             std::vector<Predicate> output_inclusions = util::create_inclusions_from_multiple_sides(output_vars_divisions, output_vars_to_new_output_vars);
-            new_element.process_substituting_inclusions_from_left(output_inclusions, false);
+            std::set<BasicTerm> newly_substituted_vars_from_left = new_element.process_substituting_inclusions_from_left(output_inclusions, false);
+
+            // Remove unneccesary variables that were substituted (we do it here, because we the code before depends on the newly substituted vars to be in subtitution_map)
+            new_element.remove_vars(newly_substituted_vars_from_right, initial_variables);
+            new_element.remove_vars(newly_substituted_vars_from_left, initial_variables);
 
             push_to_worklist(std::move(new_element), false);
         }
@@ -829,9 +845,6 @@ namespace smt::noodler {
             return {LenNode(LenFormulaType::TRUE), precision};
         }
 
-        // some formulas (lie the one for conversions) assumes that we have flattened substitution map
-        solution.flatten_substition_map();
-
         // collect all variables that substitute some string_var of some conversion (we do it here
         // because we need to know which variables are used in conversions for parikh image of variables
         // in transducers)
@@ -845,9 +858,11 @@ namespace smt::noodler {
 
         // compute formula for vars in transducers (lengths and code-point conversions)
         conjuncts.push_back(get_formula_for_transducers());
+        util::check_limit(m);
 
         // formula for encoding lengths
         conjuncts.push_back(get_formula_for_len_vars());
+        util::check_limit(m);
 
         // add formula for conversions
         auto conv_form_with_precision = get_formula_for_conversions();
@@ -1083,7 +1098,7 @@ namespace smt::noodler {
             // chars in the language of c (except dummy symbol)
             std::set<mata::Symbol> real_symbols_of_code_var;
             bool is_there_dummy_symbol = false;
-            for (mata::Symbol s : mata::strings::get_accepted_symbols(*solution.aut_ass.at(c))) { // iterate trough chars of c
+            for (mata::Symbol s : mata::applications::strings::get_accepted_symbols(*solution.aut_ass.at(c))) { // iterate trough chars of c
                 if (!util::is_dummy_symbol(s)) {
                     real_symbols_of_code_var.insert(s);
                 } else {
@@ -1809,6 +1824,8 @@ namespace smt::noodler {
             }
         );
 
+        set_initial_variables(equations_and_transducers);
+
         SolvingState init_solving_state;
         init_solving_state.length_sensitive_vars = std::move(this->init_length_sensitive_vars);
         init_solving_state.aut_ass = std::move(this->init_aut_ass);
@@ -1840,6 +1857,7 @@ namespace smt::noodler {
             }
         }
 
+        init_solving_state.flatten_substition_map();
 
         STRACE(str_noodle_dot, tout << "digraph Procedure {\ninit[shape=none, label=\"\"]\n";);
         push_to_worklist(std::move(init_solving_state), true);
@@ -2356,6 +2374,24 @@ namespace smt::noodler {
             }
         }
         return needed_vars;
+    }
+
+    void DecisionProcedure::set_initial_variables(const Formula& f) {
+        initial_variables = f.get_vars();
+        for (const auto& [var,_aut] : init_aut_ass) {
+            initial_variables.insert(var);
+        }
+        for (const auto& var : init_length_sensitive_vars) {
+            initial_variables.insert(var);
+        }
+        for (const auto& conv : conversions) {
+            initial_variables.insert(conv.string_var);
+        }
+        for (const auto& incl : inclusions_from_preprocessing) {
+            for (const auto& var : incl.get_vars()) {
+                initial_variables.insert(var);
+            }
+        }
     }
 
 } // Namespace smt::noodler.

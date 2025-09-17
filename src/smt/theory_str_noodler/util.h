@@ -12,7 +12,7 @@
 #include <unordered_set>
 #include <vector>
 #include <mata/nft/nft.hh>
-#include <mata/nft/strings.hh>
+#include <mata/applications/strings.hh>
 
 #include "params/smt_params.h"
 #include "ast/arith_decl_plugin.h"
@@ -53,6 +53,11 @@ namespace smt::noodler::util {
      * @param errMsg Error message
      */
     void throw_error(std::string errMsg);
+
+    /**
+     * @brief Check if we reached some resource limit (timeout) and throws error if yes
+     */
+    void check_limit(ast_manager& m);
 
     /**
     Get variables from a given expression @p ex. Append to the output parameter @p res.
