@@ -11,6 +11,69 @@
 
 namespace smt::noodler {
 
+    /*** MY HELPER FUNCTION FOR JUST A RANDOM ATTEPMT */
+    /**** !!!!!!!!!!!!!!!!!!!! HAS TO REMOVE THEM !!!!!!!!!!!!!!!!!! */
+
+    void add_data_to_map(std::map<BasicTerm, unsigned>& first_map, std::map<BasicTerm, unsigned>& second_map)
+    {
+        for (auto const& var_tuple : second_map)
+        {
+            if (!var_tuple.first.is_variable())
+            {
+                continue;
+            } 
+            std::map<BasicTerm, unsigned>::iterator it = first_map.find(var_tuple.first);
+            if (it != first_map.end())
+            {
+                it->second += var_tuple.second;
+            } else {
+                first_map.insert({var_tuple.first, var_tuple.second});
+            }
+        }
+    }
+
+    bool is_side_marked(Predicate &eq, std::vector<BasicTerm>& marked_vars, Predicate::EquationSideType side) {
+        for (BasicTerm const& var : eq.get_side(side))
+        {
+            if (find(marked_vars.begin(), marked_vars.end(), var) == marked_vars.end())
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool get_marked_variables(std::vector<BasicTerm>& cur_marked_vars, std::deque<Predicate>& equations, int start) {
+        std::map<BasicTerm, unsigned> occur = {};
+        std::map<BasicTerm, unsigned> tmp_map = {};
+        bool changed = false;
+
+        // count total number of occurences for each variable
+        for (int ind = start; ind < equations.size(); ind++) {
+            Predicate curEq = equations[ind];
+            // get left side
+            tmp_map = curEq.variable_count(Predicate::EquationSideType::Left);
+            add_data_to_map(occur, tmp_map);
+
+            // get right side
+            tmp_map = curEq.variable_count(Predicate::EquationSideType::Right);
+            add_data_to_map(occur, tmp_map);
+        }
+
+        for (auto const& var : occur) {
+            STRACE(str, tout << "Variable " << var.second << " " << var.second << "\n");
+            if (var.second == 1 && var.first.is_variable())
+            {
+                cur_marked_vars.push_back(var.first);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    /// END OF JUST ATTEMPT !!!!!!!!!! SHOULD REMOVE THEM SOON !!!!!! 
+
     void SolvingState::substitute_vars(const std::set<BasicTerm>& vars_to_substitute) {
         // substitutes variables in a vector using substitution_map
         auto substitute_vector = [this, &vars_to_substitute](const std::vector<BasicTerm> &vector) {
@@ -557,26 +620,41 @@ namespace smt::noodler {
         /************/
         // My attempt => testing propreties when we call single product heuristic just before noodlification 
         // NODE this thing won't work I know it
-        // have to do complete single product heuristic just to get some results
-        int init_predicate_size = solving_state.predicates_to_process.size();
 
-        // loop once through initial inclusion graph
-        for (int processed_count = 0; processed_count < init_predicate_size; processed_count++)
+        /// now I will proceed with SPH when all variables in right hand side will be just once in an equation system
+        int init_predicate_size = solving_state.predicates_to_process.size();
+        // helper vector for my ugly functions on top
+        std::vector<BasicTerm> marked_vars = {};
+        get_marked_variables(marked_vars, solving_state.predicates_to_process, 0);
+
+        // copying shouldn't alter anything
+        SolvingState tmp_state = solving_state;
+
+        // loop while can loop through temporary process
+        for (int process_count = 0; process_count < init_predicate_size; process_count++)
         {
             // pick current predicates to be processed
-            Predicate predicate_to_process = solving_state.predicates_to_process[processed_count];
+            Predicate predicate_to_process = tmp_state.predicates_to_process[process_count];
 
             // don't know what to do with transducers
             if (predicate_to_process.is_equation()) { // inclusion
+                // OK so now the value that we should care about if on right side it has just variables with exactly one location in system 
+                if (!is_side_marked(predicate_to_process, marked_vars, Predicate::EquationSideType::Right)) {
+                    break;
+                }
                 // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
-                if (!process_inclusion_single_product(predicate_to_process, solving_state)) {
+                if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
+                    STRACE(str, tout << "Found UNSAT in single product heuristic\n");
                     return;
                 }
             } else {
                 SASSERT(predicate_to_process.is_transducer());
+                break;
             }
 
+            get_marked_variables(marked_vars, tmp_state.predicates_to_process, process_count+1);
         } 
+
         /// JUst dumb copying TODO change it !!!!!!
 
 
