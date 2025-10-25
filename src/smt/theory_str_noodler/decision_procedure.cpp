@@ -554,6 +554,31 @@ namespace smt::noodler {
          * and process them if z3 realizes that the result is actually not sat (because of lengths)
          */
 
+        /************/
+        // My attempt => testing propreties when we call single product heuristic just before noodlification 
+        // NODE this thing won't work I know it
+        // have to do complete single product heuristic just to get some results
+        int init_predicate_size = solving_state.predicates_to_process.size();
+
+        // loop once through initial inclusion graph
+        for (int processed_count = 0; processed_count < init_predicate_size; processed_count++)
+        {
+            // pick current predicates to be processed
+            Predicate predicate_to_process = solving_state.predicates_to_process[processed_count];
+
+            // don't know what to do with transducers
+            if (predicate_to_process.is_equation()) { // inclusion
+                // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
+                if (!process_inclusion_single_product(predicate_to_process, solving_state)) {
+                    return;
+                }
+            } else {
+                SASSERT(predicate_to_process.is_transducer());
+            }
+
+        } 
+        /// JUst dumb copying TODO change it !!!!!!
+
 
 
         /********************************************************************************************************/
@@ -1854,7 +1879,8 @@ namespace smt::noodler {
         push_to_worklist(std::move(init_solving_state), true);
 
         // temporary place for single product heuristic
-        single_product_heuristic();
+        // this version call product heuristic one step at time from noodlification step
+        // single_product_heuristic();
     }
 
     lbool DecisionProcedure::preprocess(PreprocessType opt, const BasicTermEqiv &len_eq_vars) {
