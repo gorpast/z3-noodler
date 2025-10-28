@@ -61,7 +61,7 @@ namespace smt::noodler {
         }
 
         for (auto const& var : occur) {
-            STRACE(str, tout << "Variable " << var.second << " " << var.second << "\n");
+            // STRACE(str, tout << "Variable " << var.second << " " << var.second << "\n");
             if (var.second == 1 && var.first.is_variable())
             {
                 cur_marked_vars.push_back(var.first);
@@ -622,38 +622,42 @@ namespace smt::noodler {
         // NODE this thing won't work I know it
 
         /// now I will proceed with SPH when all variables in right hand side will be just once in an equation system
-        int init_predicate_size = solving_state.predicates_to_process.size();
-        // helper vector for my ugly functions on top
-        std::vector<BasicTerm> marked_vars = {};
-        get_marked_variables(marked_vars, solving_state.predicates_to_process, 0);
-
-        // copying shouldn't alter anything
-        SolvingState tmp_state = solving_state;
-
-        // loop while can loop through temporary process
-        for (int process_count = 0; process_count < init_predicate_size; process_count++)
+        if (!solving_state.contains_length_var(right_side_vars) && !solving_state.contains_length_var(left_side_vars))
         {
-            // pick current predicates to be processed
-            Predicate predicate_to_process = tmp_state.predicates_to_process[process_count];
+            int init_predicate_size = solving_state.predicates_to_process.size();
+            // helper vector for my ugly functions on top
+            std::vector<BasicTerm> marked_vars = {};
+            get_marked_variables(marked_vars, solving_state.predicates_to_process, 0);
 
-            // don't know what to do with transducers
-            if (predicate_to_process.is_equation()) { // inclusion
-                // OK so now the value that we should care about if on right side it has just variables with exactly one location in system 
-                if (!is_side_marked(predicate_to_process, marked_vars, Predicate::EquationSideType::Right)) {
+            // copying shouldn't alter anything
+            SolvingState tmp_state = solving_state;
+
+            // loop while can loop through temporary process
+            for (int process_count = 0; process_count < init_predicate_size; process_count++)
+            {
+                // pick current predicates to be processed
+                Predicate predicate_to_process = tmp_state.predicates_to_process[process_count];
+
+                // don't know what to do with transducers
+                if (predicate_to_process.is_equation()) { // inclusion
+                    // OK so now the value that we should care about if on right side it has just variables with exactly one location in system 
+                    if (!is_side_marked(predicate_to_process, marked_vars, Predicate::EquationSideType::Right)) {
+                        break;
+                    }
+                    STRACE(str, tout << "Using SPH for inclusion: " << predicate_to_process << "\n");
+                    // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
+                    if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
+                        STRACE(str, tout << "Found UNSAT in single product heuristic\n");
+                        return;
+                    }
+                } else {
+                    SASSERT(predicate_to_process.is_transducer());
                     break;
                 }
-                // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
-                if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
-                    STRACE(str, tout << "Found UNSAT in single product heuristic\n");
-                    return;
-                }
-            } else {
-                SASSERT(predicate_to_process.is_transducer());
-                break;
-            }
 
-            get_marked_variables(marked_vars, tmp_state.predicates_to_process, process_count+1);
-        } 
+                get_marked_variables(marked_vars, tmp_state.predicates_to_process, process_count+1);
+            } 
+        }
 
         /// JUst dumb copying TODO change it !!!!!!
 
@@ -1788,12 +1792,14 @@ namespace smt::noodler {
             return {};
         }
 
+        // STRACE(str, tout << "I'm hefafdasfasfasreee\n");
         product_pres_eps_trans = mata::nfa::reduce(product_pres_eps_trans);
 
         // own segmentation of epsilon product
         mata::applications::strings::seg_nfa::Segmentation segmentation{product_pres_eps_trans, { mata::nfa::EPSILON }};
         const auto& segments{ segmentation.get_segments() };
 
+        // STRACE(str, tout << "I'm got segments  reee\n");
         // performing necesarry intersection and moving segments to resulting aut assignment
         AutAssignment eps_product_lang = {};
         for (unsigned ind = 0; ind < lhs_vars.size(); ind++) {
@@ -1806,6 +1812,7 @@ namespace smt::noodler {
             }
         }
 
+        // STRACE(str, tout << "Before another reduce\n");
         // another reduction - don't know if necesarry
         eps_product_lang.reduce();
 
@@ -1852,6 +1859,7 @@ namespace smt::noodler {
             return true;
         }
 
+        // STRACE(str, tout << "There before epsilon prduct\n");
         // get new languages from epsilon product
         AutAssignment product_aut_ass = get_product_languages(solving_state, left_side_vars, right_side_vars);
         if (product_aut_ass.size() == 0) return false;
@@ -1861,8 +1869,13 @@ namespace smt::noodler {
             solving_state.aut_ass.restrict_lang(left_var, *product_aut_ass.at(left_var));
         }
 
+        // for (const auto& x : solving_state.aut_ass) {
+        //     STRACE(str, tout << "I'm hereee:\n" << *(x.second) <<"\n");
+
+        // }
         // another reduction - don't know if necesarry
         solving_state.aut_ass.reduce();
+        // STRACE(str, tout << "I'm hereee\n");
 
         return solving_state.aut_ass.is_sat();
     }
