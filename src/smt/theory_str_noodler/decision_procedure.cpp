@@ -1703,6 +1703,13 @@ namespace smt::noodler {
             }
         }
 
+        // trimming can help a little bit
+        for (const auto &x : eps_product_lang) {
+            // STRACE(str, tout << "I'm here:\n" << (*x.second).num_of_states()<< "\n");
+            eps_product_lang[x.first] = std::make_shared<mata::nfa::Nfa>((*x.second).trim());
+            // STRACE(str, tout << "I'm here:\n" << (*x.second).num_of_states()<< "\n");
+
+        }
         // another reduction - don't know if necesarry
         eps_product_lang.reduce();
 
@@ -1728,6 +1735,7 @@ namespace smt::noodler {
             if (predicate_to_process.is_equation()) { // inclusion
                 // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
                 if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
+                    STRACE(str, tout << "Single product heuristic found UNSAT\n");
                     return;
                 }
             } else {
@@ -1760,6 +1768,13 @@ namespace smt::noodler {
             solving_state.aut_ass.restrict_lang(left_var, *product_aut_ass.at(left_var));
         }
 
+        // trimming can help a little bit
+        for (const auto &x : solving_state.aut_ass) {
+            // STRACE(str, tout << "I'm here:\n" << (*x.second).num_of_states()<< "\n");
+            solving_state.aut_ass[x.first] = std::make_shared<mata::nfa::Nfa>((*x.second).trim());
+
+            // STRACE(str, tout << "I'm here:\n" << (*x.second).num_of_states()<< "\n");
+        }
         // another reduction - don't know if necesarry
         solving_state.aut_ass.reduce();
 
