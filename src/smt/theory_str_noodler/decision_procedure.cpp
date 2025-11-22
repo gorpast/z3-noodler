@@ -1705,9 +1705,10 @@ namespace smt::noodler {
 
         // trimming can help a little bit
         for (const auto &x : eps_product_lang) {
-            // STRACE(str, tout << "I'm here:\n" << (*x.second).num_of_states()<< "\n");
+            // STRACE(str, tout << "I'm here:\n" << (*x.second).print_to_dot()<< "\n");
             eps_product_lang[x.first] = std::make_shared<mata::nfa::Nfa>((*x.second).trim());
-            // STRACE(str, tout << "I'm here:\n" << (*x.second).num_of_states()<< "\n");
+            // STRACE(str, tout << "I'm now here: " << x.first << " "<< (*x.second).num_of_states() << "\n" << (*x.second).print_to_dot()<< "\n");
+            // STRACE(str, tout << "I'm now here: " << (*x.second).num_of_states() << "\n" << (*x.second).print_to_dot()<< "\n");
 
         }
         // another reduction - don't know if necesarry
@@ -1734,7 +1735,7 @@ namespace smt::noodler {
             // don't know what to do with transducers
             if (predicate_to_process.is_equation()) { // inclusion
                 // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
-                if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
+                if (!process_inclusion_single_product(predicate_to_process, process_state)) {
                     STRACE(str, tout << "Single product heuristic found UNSAT\n");
                     return;
                 }
@@ -1770,11 +1771,10 @@ namespace smt::noodler {
 
         // trimming can help a little bit
         for (const auto &x : solving_state.aut_ass) {
-            // STRACE(str, tout << "I'm here:\n" << (*x.second).num_of_states()<< "\n");
-            solving_state.aut_ass[x.first] = std::make_shared<mata::nfa::Nfa>((*x.second).trim());
 
-            // STRACE(str, tout << "I'm here:\n" << (*x.second).num_of_states()<< "\n");
+            solving_state.aut_ass[x.first] = std::make_shared<mata::nfa::Nfa>((*x.second).trim());
         }
+
         // another reduction - don't know if necesarry
         solving_state.aut_ass.reduce();
 
