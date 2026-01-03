@@ -477,6 +477,12 @@ namespace smt::noodler {
 
     class DecisionProcedure : public AbstractDecisionProcedure {
     protected:
+
+        // TMP set up for use in single product heuristic
+        bool check_model = false;
+        bool go_back = false;
+        std::deque<SolvingState> worklist_stored = {};
+
         // counter of noodlifications
         unsigned noodlification_no = 0;
 
@@ -702,7 +708,7 @@ namespace smt::noodler {
          * Overapproximates languages - if finds UNSAT, can return UNSAT (or in fact wouldn't push back solving state)
          * if end languages are satisfiable - works with refined languages
          */
-        void single_product_heuristic();
+        lbool single_product_heuristic(SolvingState process_state);
 
         /**
          * @brief Processes inclusion from inclusion graph and eventually refines solving state languages
@@ -714,7 +720,7 @@ namespace smt::noodler {
          * 
          * @return true <-> current solving state is still SAT
          */
-        bool process_inclusion_single_product(Predicate &inclusion, SolvingState& solving_state);
+        bool process_inclusion_single_product(Predicate &inclusion, SolvingState& solving_state, std::map<Predicate, AutAssignment> segments);
 
         ////////////////////////////////////////////////////////////////
         //////////////////// FOR MODEL GENERATION //////////////////////

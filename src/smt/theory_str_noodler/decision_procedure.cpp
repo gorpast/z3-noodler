@@ -391,50 +391,60 @@ namespace smt::noodler {
         STRACE(str, tout << "------------------------"
                            << "Getting another solution"
                            << "------------------------" << std::endl;);
+        while (true) {
+            while (!is_worklist_empty()) {
+                util::check_limit(m);
+                SolvingState element_to_process = pop_from_worklist();
 
-        while (!is_worklist_empty()) {
-            util::check_limit(m);
-            SolvingState element_to_process = pop_from_worklist();
+                if (element_to_process.predicates_to_process.empty()) {
+                    // we found another solution, element_to_process contain the automata
+                    // assignment and variable substition that satisfy the original
+                    // inclusion graph
+                    solution = std::move(element_to_process);
+                    STRACE(str,
+                        tout << "Found solution:" << std::endl;
+                        for (const auto &var_substitution : solution.substitution_map) {
+                            tout << "    " << var_substitution.first << " ->";
+                            for (const auto& subst_var : var_substitution.second) {
+                                tout << " " << subst_var;
+                            }
+                            tout << std::endl;
+                        }
+                        for (const auto& var_aut : solution.aut_ass) {
+                            tout << "    " << var_aut.first << " -> NFA" << std::endl;
+                            if (is_trace_enabled(TraceTag::str_nfa)) {
+                                var_aut.second->print_to_mata(tout);
+                            }
+                        }
+                        for (const auto& transd : solution.transducers) {
+                            tout << transd << "\n";
+                        }
+                    );
+                    STRACE(str_noodle_dot, tout << solution.DOT_name << " [style=filled,fillcolor=\"aqua\"];\n";);
+                    return l_true;
+                }
 
-            if (element_to_process.predicates_to_process.empty()) {
-                // we found another solution, element_to_process contain the automata
-                // assignment and variable substition that satisfy the original
-                // inclusion graph
-                solution = std::move(element_to_process);
-                STRACE(str,
-                    tout << "Found solution:" << std::endl;
-                    for (const auto &var_substitution : solution.substitution_map) {
-                        tout << "    " << var_substitution.first << " ->";
-                        for (const auto& subst_var : var_substitution.second) {
-                            tout << " " << subst_var;
-                        }
-                        tout << std::endl;
-                    }
-                    for (const auto& var_aut : solution.aut_ass) {
-                        tout << "    " << var_aut.first << " -> NFA" << std::endl;
-                        if (is_trace_enabled(TraceTag::str_nfa)) {
-                            var_aut.second->print_to_mata(tout);
-                        }
-                    }
-                    for (const auto& transd : solution.transducers) {
-                        tout << transd << "\n";
-                    }
-                );
-                STRACE(str_noodle_dot, tout << solution.DOT_name << " [style=filled,fillcolor=\"aqua\"];\n";);
-                return l_true;
+                // we will now process one inclusion from the inclusion graph which is at front
+                // i.e. we will update automata assignments and substitutions so that this inclusion is fulfilled
+                Predicate predicate_to_process = element_to_process.predicates_to_process.front();
+                element_to_process.predicates_to_process.pop_front();
+
+                if (predicate_to_process.is_equation()) { // inclusion
+                    process_inclusion(predicate_to_process, element_to_process);
+                } else {
+                    SASSERT(predicate_to_process.is_transducer());
+                    process_transducer(predicate_to_process, element_to_process);
+                }
+                    
             }
 
-            // we will now process one inclusion from the inclusion graph which is at front
-            // i.e. we will update automata assignments and substitutions so that this inclusion is fulfilled
-            Predicate predicate_to_process = element_to_process.predicates_to_process.front();
-            element_to_process.predicates_to_process.pop_front();
-
-            if (predicate_to_process.is_equation()) { // inclusion
-                process_inclusion(predicate_to_process, element_to_process);
-            } else {
-                SASSERT(predicate_to_process.is_transducer());
-                process_transducer(predicate_to_process, element_to_process);
-            }
+            // has to check if wanted just fast model check or full
+            if (check_model) {
+                // tmp place for SPH stuff - found UNSAT => go_back
+                worklist.swap(worklist_stored);
+                check_model = false;
+                STRACE(str, tout << "SPH got back!!!!, restoring state\n");
+            } else break;
         }
 
         // there are no solving states left, which means nothing led to solution -> it must be unsatisfiable
@@ -543,6 +553,16 @@ namespace smt::noodler {
         /********************************************************************************************************/
         /*************************************** End of inclusion test ******************************************/
         /********************************************************************************************************/
+
+        // temporary place for single product heuristic
+        lbool SPH_res = single_product_heuristic(solving_state);
+        if (SPH_res == l_false) {
+            // has to check what needs to be returned if it is UNSAT
+            return;
+        } else if (SPH_res == l_true) {
+            // just skip dealing with it for now and check the model
+            return; 
+        }
 
         // we are processing this inclusion as it does not hold, so we need to replace it with new inclusions/substitutions -> we remove it first
         solving_state.remove_predicate(inclusion_to_process);
@@ -1672,7 +1692,7 @@ namespace smt::noodler {
         SASSERT(lhs_division.size() == lhs_vars.size()); // each division should contain exactly one left variable
         SASSERT(lhs_automata.size() == lhs_division.size()); // we have one automaton for each division
 
-        // concatenation of lhs using epsilon transition - these transition will then be removed during segmatation
+        // concatenation of lhs using epsilon transition - these transition will then be removed during segmentation
         mata::nfa::Nfa concatenated_lhs = epsilon_concatenation(lhs_automata);
 
         // ordinary concatenation of right hand side
@@ -1716,39 +1736,80 @@ namespace smt::noodler {
         return eps_product_lang;
     }
 
-    void DecisionProcedure::single_product_heuristic() {
-        STRACE(str, tout << "Single product heuristic...\n");
-        // getting current state
-        SolvingState process_state = pop_from_worklist();
+    lbool DecisionProcedure::single_product_heuristic(SolvingState process_state) {
 
-        int init_predicate_size = process_state.predicates_to_process.size();
+        if (check_model) return l_undef;
 
-        SolvingState tmp_state = process_state;
 
-        // loop once through initial inclusion graph
-        for (int processed_count = 0; processed_count < init_predicate_size; processed_count++)
-        {
-            // pick current predicates to be processed
-            Predicate predicate_to_process = process_state.predicates_to_process[processed_count];
+        if (true) {
 
-            // don't know what to do with transducers
-            if (predicate_to_process.is_equation()) { // inclusion
-                // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
-                if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
-                    STRACE(str, tout << "Single product heuristic found UNSAT\n");
-                    return;
+            int init_predicate_size = process_state.predicates_to_process.size();
+
+            SolvingState tmp_state = process_state;
+            
+            std::map<Predicate, AutAssignment> segments_vector = {};
+
+            // loop once through initial inclusion graph
+            for (int processed_count = 0; processed_count < init_predicate_size; processed_count++)
+            {
+                // pick current predicates to be processed
+                Predicate predicate_to_process = process_state.predicates_to_process[processed_count];
+
+                // don't know what to do with transducers
+                if (predicate_to_process.is_equation()) { // inclusion
+                    // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
+                    if (!process_inclusion_single_product(predicate_to_process, tmp_state, segments_vector)) {
+                        STRACE(str, tout << "Single product heuristic found UNSAT\n");
+                        return l_false;
+                    }
+                } else {
+                    SASSERT(predicate_to_process.is_transducer());
                 }
-            } else {
-                SASSERT(predicate_to_process.is_transducer());
+
+            } 
+
+            solution = tmp_state;
+            solution.length_sensitive_vars = {};
+
+            // ignore length sensitivity for now
+            if (solution.length_sensitive_vars.size() == 0) {
+
+                // now I know that after SPH the problem is satisfiable
+                // so I try to get one model - if SAT can return SAT
+                // else I connect noodles in a way - TODO
+                const std::map<smt::noodler::BasicTerm, rational>& arith_model = {}; 
+                AutAssignment model_ass = {};
+                for (auto &var : tmp_state.aut_ass) {
+                    // STRACE(str, tout << "Length sensitivity: " << solution.length_sensitive_vars.contains(var.first) << "\n");
+                    // STRACE(str, tout << "For var: " << var.first << " model is: " << get_model(var.first, arith_model) << "\n");
+                    zstring model_word = get_model(var.first, arith_model);
+                    model_ass[var.first] = std::make_shared<mata::nfa::Nfa>(model_ass.create_word_nfa(model_word));
+                }
+                STRACE(str, tout << model_ass.print() << "\n");
+
+                tmp_state.aut_ass = model_ass;
+
+                // has to push it back
+                worklist.push_back(std::move(process_state));
+            
+                // I will run main procedure to compute satisfiability of that model
+                // if it will be sat - just sat
+                // if unsat has to get back to this function 
+                check_model = true;
+                // worklist used to recover last state of decision procedure
+                worklist_stored.swap(worklist);
+
+                STRACE(str, tout<< worklist_stored.size() << " swapped \n");
+
+                // want to check just satisfiability of this state - will perform whole main dec procedure
+                worklist.clear();
+                worklist.push_back(std::move(tmp_state));
             }
-
-        } 
-
-        // pushing process state back - think it doesnt depend second argument
-        push_to_worklist(std::move(process_state), false);
+        }
+        return l_true;
     }
 
-    bool DecisionProcedure::process_inclusion_single_product(Predicate& inclusion, SolvingState& solving_state) {
+    bool DecisionProcedure::process_inclusion_single_product(Predicate& inclusion, SolvingState& solving_state, std::map<Predicate, AutAssignment> segments) {
 
         // getting automata for both sides
         const auto &left_side_vars = inclusion.get_left_side();
@@ -1762,6 +1823,10 @@ namespace smt::noodler {
         // get new languages from epsilon product
         AutAssignment product_aut_ass = get_product_languages(solving_state, left_side_vars, right_side_vars);
         if (product_aut_ass.size() == 0) return false;
+
+        if (!segments.count(inclusion)) {
+            segments.insert({inclusion, product_aut_ass});
+        }
 
         // perform intersection of current languages and new product languages
         for (const auto &left_var : left_side_vars) {
@@ -1870,8 +1935,6 @@ namespace smt::noodler {
         STRACE(str_noodle_dot, tout << "digraph Procedure {\ninit[shape=none, label=\"\"]\n";);
         push_to_worklist(std::move(init_solving_state), true);
 
-        // temporary place for single product heuristic
-        single_product_heuristic();
     }
 
     lbool DecisionProcedure::preprocess(PreprocessType opt, const BasicTermEqiv &len_eq_vars) {
