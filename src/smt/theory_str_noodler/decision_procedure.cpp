@@ -1740,6 +1740,7 @@ namespace smt::noodler {
 
         if (check_model) return l_undef;
 
+        STRACE(str, tout << "Single product heuristic...\n");
 
         if (true) {
 
@@ -1769,20 +1770,21 @@ namespace smt::noodler {
             } 
 
             solution = tmp_state;
-            solution.length_sensitive_vars = {};
 
             // ignore length sensitivity for now
             if (solution.length_sensitive_vars.size() == 0) {
 
+                STRACE(str, tout << "hereree\n");
                 // now I know that after SPH the problem is satisfiable
                 // so I try to get one model - if SAT can return SAT
                 // else I connect noodles in a way - TODO
                 const std::map<smt::noodler::BasicTerm, rational>& arith_model = {}; 
                 AutAssignment model_ass = {};
                 for (auto &var : tmp_state.aut_ass) {
-                    // STRACE(str, tout << "Length sensitivity: " << solution.length_sensitive_vars.contains(var.first) << "\n");
-                    // STRACE(str, tout << "For var: " << var.first << " model is: " << get_model(var.first, arith_model) << "\n");
-                    zstring model_word = get_model(var.first, arith_model);
+                    // zstring model_word = get_model(var.first, arith_model);
+                    mata::Word mata_word = *mata::applications::strings::get_shortest_words(*(var.second)).begin();
+                    zstring model_word = zstring(mata_word.size(), mata_word.data());
+
                     model_ass[var.first] = std::make_shared<mata::nfa::Nfa>(model_ass.create_word_nfa(model_word));
                 }
                 STRACE(str, tout << model_ass.print() << "\n");
@@ -1790,7 +1792,7 @@ namespace smt::noodler {
                 tmp_state.aut_ass = model_ass;
 
                 // has to push it back
-                worklist.push_back(std::move(process_state));
+                worklist.push_front(std::move(process_state));
             
                 // I will run main procedure to compute satisfiability of that model
                 // if it will be sat - just sat
@@ -1804,9 +1806,10 @@ namespace smt::noodler {
                 // want to check just satisfiability of this state - will perform whole main dec procedure
                 worklist.clear();
                 worklist.push_back(std::move(tmp_state));
+                return l_true;
             }
         }
-        return l_true;
+        return l_undef;
     }
 
     bool DecisionProcedure::process_inclusion_single_product(Predicate& inclusion, SolvingState& solving_state, std::map<Predicate, AutAssignment> segments) {
