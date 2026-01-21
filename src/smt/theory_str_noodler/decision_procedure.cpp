@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <functional>
 
+#include <chrono>
+
 #include <mata/applications/strings.hh>
 #include "util.h"
 #include "aut_assignment.h"
@@ -624,13 +626,15 @@ namespace smt::noodler {
         /// now I will proceed with SPH when all variables in right hand side will be just once in an equation system
         if (!solving_state.contains_length_var(right_side_vars) && !solving_state.contains_length_var(left_side_vars))
         {
+            auto start = std::chrono::system_clock::now();
+
             int init_predicate_size = solving_state.predicates_to_process.size();
-            // helper vector for my ugly functions on top
-            std::vector<BasicTerm> marked_vars = {};
-            get_marked_variables(marked_vars, solving_state.predicates_to_process, 0);
 
             // copying shouldn't alter anything
             SolvingState tmp_state = solving_state;
+
+            STRACE(str, tout << "SPH start\n");
+            STRACE(str, tout << tmp_state.aut_ass.print());
 
             // loop while can loop through temporary process
             for (int process_count = 0; process_count < init_predicate_size; process_count++)
@@ -638,16 +642,17 @@ namespace smt::noodler {
                 // pick current predicates to be processed
                 Predicate predicate_to_process = tmp_state.predicates_to_process[process_count];
 
+                STRACE(str, tout << "Predicate" << predicate_to_process << "\n");
+
                 // don't know what to do with transducers
                 if (predicate_to_process.is_equation()) { // inclusion
-                    // OK so now the value that we should care about if on right side it has just variables with exactly one location in system 
-                    if (!is_side_marked(predicate_to_process, marked_vars, Predicate::EquationSideType::Right)) {
-                        break;
-                    }
-                    STRACE(str, tout << "Using SPH for inclusion: " << predicate_to_process << "\n");
+                    // STRACE(str, tout << "Using SPH for inclusion: " << predicate_to_process << "\n");
                     // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
                     if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
-                        STRACE(str, tout << "Found UNSAT in single product heuristic\n");
+                        // STRACE(str, tout << "Found UNSAT in single product heuristic\n");
+                        auto dur = std::chrono::system_clock::now() - start;
+                        STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
+                        STRACE(str, tout << "SPH UNSAT\n");
                         return;
                     }
                 } else {
@@ -655,8 +660,10 @@ namespace smt::noodler {
                     break;
                 }
 
-                get_marked_variables(marked_vars, tmp_state.predicates_to_process, process_count+1);
             } 
+            auto dur = std::chrono::system_clock::now() - start;
+            STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
+            STRACE(str, tout << "SPH SAT\n");
         }
 
         /// JUst dumb copying TODO change it !!!!!!
