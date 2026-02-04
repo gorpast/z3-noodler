@@ -623,48 +623,44 @@ namespace smt::noodler {
         // My attempt => testing propreties when we call single product heuristic just before noodlification 
         // NODE this thing won't work I know it
 
-        /// now I will proceed with SPH when all variables in right hand side will be just once in an equation system
-        if (!solving_state.contains_length_var(right_side_vars) && !solving_state.contains_length_var(left_side_vars))
+        auto start = std::chrono::system_clock::now();
+
+        int init_predicate_size = solving_state.predicates_to_process.size();
+
+        // copying shouldn't alter anything
+        SolvingState tmp_state = solving_state;
+
+        STRACE(str, tout << "SPH start\n");
+        STRACE(str, tout << tmp_state.aut_ass.print());
+
+        // loop while can loop through temporary process
+        for (int process_count = 0; process_count < init_predicate_size; process_count++)
         {
-            auto start = std::chrono::system_clock::now();
+            // pick current predicates to be processed
+            Predicate predicate_to_process = tmp_state.predicates_to_process[process_count];
 
-            int init_predicate_size = solving_state.predicates_to_process.size();
+            STRACE(str, tout << "Predicate" << predicate_to_process << "\n");
 
-            // copying shouldn't alter anything
-            SolvingState tmp_state = solving_state;
-
-            STRACE(str, tout << "SPH start\n");
-            STRACE(str, tout << tmp_state.aut_ass.print());
-
-            // loop while can loop through temporary process
-            for (int process_count = 0; process_count < init_predicate_size; process_count++)
-            {
-                // pick current predicates to be processed
-                Predicate predicate_to_process = tmp_state.predicates_to_process[process_count];
-
-                STRACE(str, tout << "Predicate" << predicate_to_process << "\n");
-
-                // don't know what to do with transducers
-                if (predicate_to_process.is_equation()) { // inclusion
-                    // STRACE(str, tout << "Using SPH for inclusion: " << predicate_to_process << "\n");
-                    // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
-                    if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
-                        // STRACE(str, tout << "Found UNSAT in single product heuristic\n");
-                        auto dur = std::chrono::system_clock::now() - start;
-                        STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
-                        STRACE(str, tout << "SPH UNSAT\n");
-                        return;
-                    }
-                } else {
-                    SASSERT(predicate_to_process.is_transducer());
-                    break;
+            // don't know what to do with transducers
+            if (predicate_to_process.is_equation()) { // inclusion
+                // STRACE(str, tout << "Using SPH for inclusion: " << predicate_to_process << "\n");
+                // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
+                if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
+                    // STRACE(str, tout << "Found UNSAT in single product heuristic\n");
+                    auto dur = std::chrono::system_clock::now() - start;
+                    STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
+                    STRACE(str, tout << "SPH UNSAT\n");
+                    return;
                 }
+            } else {
+                SASSERT(predicate_to_process.is_transducer());
+                break;
+            }
 
-            } 
-            auto dur = std::chrono::system_clock::now() - start;
-            STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
-            STRACE(str, tout << "SPH SAT\n");
-        }
+        } 
+        auto dur = std::chrono::system_clock::now() - start;
+        STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
+        STRACE(str, tout << "SPH SAT\n");
 
         /// JUst dumb copying TODO change it !!!!!!
 
@@ -1861,10 +1857,10 @@ namespace smt::noodler {
         const auto &left_side_vars = inclusion.get_left_side();
         const auto &right_side_vars = inclusion.get_right_side();
 
-        // inclusion contains length aware variables can't od anything
-        if (solving_state.contains_length_var(right_side_vars) || solving_state.contains_length_var(left_side_vars)) {
-            return true;
-        }
+        // // inclusion contains length aware variables can't od anything
+        // if (solving_state.contains_length_var(right_side_vars) || solving_state.contains_length_var(left_side_vars)) {
+        //     return true;
+        // }
 
         // STRACE(str, tout << "There before epsilon prduct\n");
         // get new languages from epsilon product
