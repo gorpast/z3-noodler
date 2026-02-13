@@ -631,7 +631,7 @@ namespace smt::noodler {
         SolvingState tmp_state = solving_state;
 
         STRACE(str, tout << "SPH start\n");
-        STRACE(str, tout << tmp_state.aut_ass.print());
+        // STRACE(str, tout << tmp_state.aut_ass.print());
 
         // loop while can loop through temporary process
         for (int process_count = 0; process_count < init_predicate_size; process_count++)
@@ -639,7 +639,7 @@ namespace smt::noodler {
             // pick current predicates to be processed
             Predicate predicate_to_process = tmp_state.predicates_to_process[process_count];
 
-            STRACE(str, tout << "Predicate" << predicate_to_process << "\n");
+            // STRACE(str, tout << "Predicate" << predicate_to_process << "\n");
 
             // don't know what to do with transducers
             if (predicate_to_process.is_equation()) { // inclusion
@@ -1795,7 +1795,7 @@ namespace smt::noodler {
             return {};
         }
 
-        // STRACE(str, tout << "I'm hefafdasfasfasreee\n");
+        STRACE(str, tout << "I'm hefafdasfasfasreee\n");
         product_pres_eps_trans = mata::nfa::reduce(product_pres_eps_trans);
 
         // own segmentation of epsilon product
@@ -1815,7 +1815,16 @@ namespace smt::noodler {
             }
         }
 
-        // STRACE(str, tout << "Before another reduce\n");
+        // trimming can help a little bit
+        for (const auto &x : solving_state.aut_ass) {
+
+            solving_state.aut_ass[x.first] = std::make_shared<mata::nfa::Nfa>((*x.second).trim());
+            // if ((*solving_state.aut_ass[x.first]).num_of_states() > 10000) {
+            //     STRACE(str, tout << "Start BNCH:\n" << *(solving_state.aut_ass[x.first]) << "End BNCH\n");
+            // }
+        }
+
+
         // another reduction - don't know if necesarry
         eps_product_lang.reduce();
 
@@ -1862,7 +1871,6 @@ namespace smt::noodler {
         //     return true;
         // }
 
-        // STRACE(str, tout << "There before epsilon prduct\n");
         // get new languages from epsilon product
         AutAssignment product_aut_ass = get_product_languages(solving_state, left_side_vars, right_side_vars);
         if (product_aut_ass.size() == 0) return false;
@@ -1872,13 +1880,17 @@ namespace smt::noodler {
             solving_state.aut_ass.restrict_lang(left_var, *product_aut_ass.at(left_var));
         }
 
-        // for (const auto& x : solving_state.aut_ass) {
-        //     STRACE(str, tout << "I'm hereee:\n" << *(x.second) <<"\n");
+        // trimming can help a little bit
+        for (const auto &x : solving_state.aut_ass) {
 
-        // }
+            solving_state.aut_ass[x.first] = std::make_shared<mata::nfa::Nfa>((*x.second).trim());
+            // if ((*solving_state.aut_ass[x.first]).num_of_states() > 10000) {
+            //     STRACE(str, tout << "Start BNCH:\n" << *(solving_state.aut_ass[x.first]) << "End BNCH\n");
+            // }
+        }
+
         // another reduction - don't know if necesarry
         solving_state.aut_ass.reduce();
-        // STRACE(str, tout << "I'm hereee\n");
 
         return solving_state.aut_ass.is_sat();
     }
