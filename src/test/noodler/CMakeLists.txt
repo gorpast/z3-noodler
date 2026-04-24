@@ -16,15 +16,13 @@ if (Catch2_FOUND)
             main.cc
             inclusion-graph-node.cc
             theory_str_noodler.cc
+            end_to_end.cpp
             formula-preprocess.cpp
             decision-procedure.cpp
             parikh.cc
             util.cc
             formula.cpp
     )
-
-    find_library(LIBMATA mata)
-    target_link_libraries(test-noodler PRIVATE ${LIBMATA})
 
     z3_add_install_tactic_rule(${z3_test_deps})
     z3_add_memory_initializer_rule(${z3_test_deps})
@@ -36,4 +34,5 @@ if (Catch2_FOUND)
     z3_append_linker_flag_list_to_target(test-noodler ${Z3_DEPENDENT_EXTRA_CXX_LINK_FLAGS})
     z3_add_component_dependencies_to_target(test-noodler ${z3_test_expanded_deps})
     target_link_libraries(test-noodler PRIVATE Catch2::Catch2WithMain)
+    add_dependencies(test-noodler shell)
 endif()

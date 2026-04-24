@@ -1,12 +1,12 @@
 # Z3-Noodler
 
 [![GitHub tag](https://img.shields.io/github/tag/VeriFIT/z3-noodler.svg)](https://github.com/VeriFIT/z3-noodler)
-![Build](https://github.com/VeriFIT/z3-noodler/actions/workflows/build.yml/badge.svg)
-![JS Binding](https://github.com/VeriFIT/z3-noodler/actions/workflows/js-binding.yml/badge.svg)
+![Build](https://github.com/VeriFIT/z3-noodler/actions/workflows/noodler-build-test.yml/badge.svg)
+![JS Binding](https://github.com/VeriFIT/z3-noodler/actions/workflows/noodler-js-binding.yml/badge.svg)
 
 Z3-Noodler is an SMT solver for string constraints such as those that occur in symbolic execution and analysis of programs, 
 reasoning about configuration files of cloud services and smart contracts, etc.
-Z3-Noodler is based on the SMT solver [Z3 v4.15.1](https://github.com/Z3Prover/z3/releases/tag/z3-4.15.1), in which it replaces the solver for the theory of strings. 
+Z3-Noodler is based on the SMT solver [Z3 v4.15.8](https://github.com/Z3Prover/z3/releases/tag/z3-4.15.8), in which it replaces the solver for the theory of strings. 
 The core of the string solver implements several decision procedures, but mainly it relies on the equation stabilization algorithm (see [Publications](#publications)).
 
 Z3-Noodler utilizes the automata library [Mata](https://github.com/VeriFIT/mata/) for efficient representation of automata and their processing.
@@ -15,19 +15,32 @@ For a brief overview of the architecture, see [SMT-COMP'24 Z3-Noodler descriptio
 
 ## Building and running
 
-### Dependencies
+### Step 1 (Optional): Install Mata
 
-1) The [Mata](https://github.com/VeriFIT/mata/) library for efficient handling of finite automata. Minimum required version of `mata` is `v1.23.3`.
-    ```shell
-    git clone 'https://github.com/VeriFIT/mata.git'
-    cd mata
-    make release
-    sudo make install
-    ```
+Z3-Noodler depends on the Mata library for efficient handling of finite automata.
 
-    Make sure your system looks for libraries in `/usr/local/include` (where Mata will be installed). For example, MacOS might skip looking for libraries there, so you might need to add these paths by running, for example `xcode-select --install`, as per a [suggestion from StackOverflow](https://stackoverflow.com/a/26265473).
+Installing Mata **is not required** to build or run Z3-Noodler.
+If Mata is not found on your system, it will be **automatically fetched and built** as part of the Z3-Noodler build process.
 
-### Building Z3-Noodler
+However, if you plan to **develop or frequently rebuild Z3-Noodler**, it is recommended to install Mata manually. This avoids repeatedly downloading and rebuilding Mata and significantly speeds up development workflows.
+
+The minimum required Mata version is `v1.32.0`.
+
+To install mata, run:
+```shell
+git clone 'https://github.com/VeriFIT/mata.git'
+cd mata
+make release
+sudo make install
+```
+
+Make sure your system looks for libraries in `/usr/local/include` (where Mata will be installed).
+On macOS, you may [need to install the Xcode command line tools](https://stackoverflow.com/a/26265473):
+```shell
+xcode-select --install
+```
+
+### Step 2: Build Z3-Noodler
 
 ```shell
 git clone 'https://github.com/VeriFIT/z3-noodler.git'
@@ -48,26 +61,35 @@ command.
 make test-noodler
 ```
 
-### Running Z3-Noodler
-To run Z3-Noodler, use:
+### Step 3: Run Z3-Noodler
+To run Z3-Noodler on an SMT-LIB instance:
 ```shell
-cd build/
 ./z3 <instance_file.smt2> 
 ```
 
 If you want to get a model for sat instances (using `get-model` or `get-value`), you need to enable model generation:
 ```shell
-cd build/
 ./z3 model=true <instance_file.smt2> 
 ```
 
-To run tests for Z3-Noodler, execute
+To run tests for Z3-Noodler:
 ```shell
-cd build/
 ./test-noodler
 ```
 
+## Additional string functions
+Other than the constraints defined in the [SMT-LIB theory of strings](https://smt-lib.org/theories-UnicodeStrings.shtml), Z3-Noodler can handle some additional functions
+(defined in [ADDITIONAL_FUNCTIONS.md](ADDITIONAL_FUNCTIONS.md)):
+ - `str.to_real`
+ - `str.from_real`
+ - `str.to_lower`
+ - `str.to_upper`
+ - `str.update`
+ - `str.trim`
+ - `str.delete`
+
 ## Publications
+- Y. Chen, V. Havlena, M.Hečko, L.Holík, and O. Lengál. [A Uniform Framework for Handling Position Constraints in String Solving](https://dl.acm.org/doi/10.1145/3729273). In *Proc. of PLDI'25*, volume 9, pages 550-575, 2025. ACM.
 - D. Chocholatý, V. Havlena, L. Holík, J. Hranička, O. Lengál, and J. Síč. [Z3-Noodler 1.3: Shepherding Decision Procedures for Strings with Model Generation](https://link.springer.com/chapter/10.1007/978-3-031-90653-4_2). In *Proc. of TACAS'25*, volume 15697 of LNCS, pages 23-44, 2025. Springer.
 - V. Havlena, L. Holík, O. Lengál, and J. Síč. [Cooking String-Integer Conversions with Noodles](https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.SAT.2024.14). In *Proc. of SAT'24*, LIPIcs, Volume 305, pp. 14:1-14:19, 2024. Schloss Dagstuhl – Leibniz-Zentrum für Informatik.
 - Y. Chen, D. Chocholatý, V. Havlena, L. Holík, O. Lengál, and J. Síč. [Z3-Noodler: An Automata-based String Solver](https://doi.org/10.1007/978-3-031-57246-3_2). In *Proc. of TACAS'24*, volume 14570 of LNCS, pages 24-33, 2024. Springer. 
@@ -83,7 +105,9 @@ Tests for Z3-Noodler are located in [src/test/noodler](src/test/noodler).
 
 ## Licensing
 
-Z3-Noodler is licensed under the MIT License. See [LICENSE.md](./LICENSE.md).
+Z3-Noodler is licensed under the MIT License for general use (see [LICENSE.md](./LICENSE.md)).
+However, use of this software, or any derivative work, as a participant in the SMT-COMP competition requires a separate Competition Use License from the copyright holder.
+For competitor licensing requests, contact the authors.
 
 Z3-Noodler is a derivative work of the SMT solver Z3.
 The original SMT solver Z3 from the [Z3 repository](https://github.com/Z3Prover/z3) is licensed under the MIT License. See [LICENSE_Z3.txt](./LICENSE_Z3.txt).

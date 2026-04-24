@@ -27,52 +27,6 @@ namespace smt::noodler::util {
         }
     }
 
-    void get_str_variables(expr* const ex, const seq_util& m_util_s, const ast_manager& m, obj_hashtable<expr>& res, obj_map<expr, expr*>* pred_map) {
-        if(m_util_s.str.is_string(ex)) {
-            return;
-        }
-
-        if(is_str_variable(ex, m_util_s)) {
-            res.insert(ex);
-            return;
-        }
-
-        SASSERT(is_app(ex));
-        app* ex_app{ to_app(ex) };
-        if(pred_map != nullptr) {
-            expr* rpl;
-            if(pred_map->find(ex_app, rpl)) {
-                get_str_variables(rpl, m_util_s, m, res, pred_map);
-            }
-        }
-
-        for(unsigned i = 0; i < ex_app->get_num_args(); i++) {
-            SASSERT(is_app(ex_app->get_arg(i)));
-            app *arg = to_app(ex_app->get_arg(i));
-            get_str_variables(arg, m_util_s, m, res, pred_map);
-        }
-    }
-
-    void get_variable_names(expr* const ex, const seq_util& m_util_s, const ast_manager& m, std::unordered_set<std::string>& res) {
-        if(m_util_s.str.is_string(ex)) {
-            return;
-        }
-
-        if(is_variable(ex)) {
-            res.insert(std::to_string(to_app(ex)->get_name()));
-            return;
-        }
-
-        SASSERT(is_app(ex));
-        app* ex_app{ to_app(ex) };
-
-        for(unsigned i = 0; i < ex_app->get_num_args(); i++) {
-            SASSERT(is_app(ex_app->get_arg(i)));
-            app *arg = to_app(ex_app->get_arg(i));
-            get_variable_names(arg, m_util_s, m, res);
-        }
-    }
-
     bool is_variable(const expr* expression) {
         if (!is_app(expression)) {
             return false;
@@ -85,33 +39,21 @@ namespace smt::noodler::util {
         return m_util_s.is_string(expression->get_sort()) && is_variable(expression);
     }
 
-    void collect_terms(app* const ex, ast_manager& m, const seq_util& m_util_s, obj_map<expr, expr*>& pred_replace,
-                       std::map<BasicTerm, expr_ref>& var_name, std::vector<BasicTerm>& terms) {
-
-        if(m_util_s.str.is_string(ex)) { // Handle string literals.
+    void collect_terms(app* const ex, ast_manager& m, const seq_util& m_util_s, obj_map<expr, expr*>& pred_replace, std::vector<BasicTerm>& terms) {
+        if (m_util_s.str.is_string(ex)) { // string literals
             terms.emplace_back(BasicTermType::Literal, ex->get_parameter(0).get_zstring());
-            return;
-        }
-
-        if(is_variable(ex)) {
-            std::string var = ex->get_decl()->get_name().str();
-            BasicTerm bvar(BasicTermType::Variable, var);
-            terms.emplace_back(bvar);
-            var_name.insert({bvar, expr_ref(ex, m)});
-            return;
-        }
-
-        if(!m_util_s.str.is_concat(ex)) {
+        } else if (is_variable(ex)) { // string variables
+            terms.emplace_back(get_variable_basic_term(ex));
+        } else if (m_util_s.str.is_concat(ex)) { // concatenation
+            SASSERT(ex->get_num_args() == 2);
+            app *a_x = to_app(ex->get_arg(0));
+            app *a_y = to_app(ex->get_arg(1));
+            collect_terms(a_x, m, m_util_s, pred_replace, terms);
+            collect_terms(a_y, m, m_util_s, pred_replace, terms);
+        } else { // other expressions, should be replaced by some variable
             expr* rpl = pred_replace.find(ex); // dies if it is not found
-            collect_terms(to_app(rpl), m, m_util_s, pred_replace, var_name, terms);
-            return;
+            collect_terms(to_app(rpl), m, m_util_s, pred_replace, terms);
         }
-
-        SASSERT(ex->get_num_args() == 2);
-        app *a_x = to_app(ex->get_arg(0));
-        app *a_y = to_app(ex->get_arg(1));
-        collect_terms(a_x, m, m_util_s, pred_replace, var_name, terms);
-        collect_terms(a_y, m, m_util_s, pred_replace, var_name, terms);
     }
 
     BasicTerm get_variable_basic_term(expr *const variable) {
@@ -143,26 +85,6 @@ namespace smt::noodler::util {
         for(unsigned i = 0; i < ex_app->get_num_args(); i++) {
             get_len_exprs(ex_app->get_arg(i), m_util_s, m, res);
         }
-    }
-
-    bool is_len_sub(expr* val, expr* s, ast_manager& m, seq_util& m_util_s, arith_util& m_util_a, expr*& num_res) {
-        expr* num = nullptr;
-        expr* len = nullptr;
-        expr* str = nullptr;
-        if(!m_util_a.is_add(val, num, len)) {
-            return false;
-        }
-
-        if(!m_util_a.is_int(num)) {
-            return false;
-        }
-        num_res = num;
-
-        if(!m_util_s.str.is_length(len, str) || str->hash() != s->hash()) {
-            return false;
-        }
-
-        return true;
     }
 
     bool split_word_to_automata(const zstring& word, const std::vector<std::shared_ptr<mata::nfa::Nfa>>& automata, std::vector<zstring>& words) {
@@ -290,6 +212,7 @@ namespace smt::noodler::util {
     }
 
     void replace_dummy_symbol_in_transducer_with(mata::nft::Nft& transducer, const std::set<mata::Symbol>& symbols_to_replace_with) {
+        if (symbols_to_replace_with.empty()) { return; }
         if (symbols_to_replace_with.size() > 1) {
             // different transitions with dummy symbol can be connected, i.e. they should have the same symbol, if we would replace
             // by multiple symbols, it would allow situations where the transitions have different symbols on them
@@ -440,7 +363,7 @@ namespace smt::noodler::util {
         std::set<State> visited_states;
         std::deque<State> queue;
         for(mata::nft::State initial_state : transducer.initial) {
-            queue.emplace_back(initial_state, transducer.num_of_levels);
+            queue.emplace_back(initial_state, transducer.levels.num_of_levels);
         }
         while(!queue.empty()) {
             State current_state = queue.front();
@@ -471,5 +394,147 @@ namespace smt::noodler::util {
             }
         }
         return l_false;
+    }
+
+    std::optional<std::vector<mata::Word>> get_word_from_nft(const mata::nft::Nft nft, const std::vector<unsigned>& lengths, const std::set<mata::nft::State>& potentional_initial_states, const std::map<mata::nft::Transition,std::shared_ptr<unsigned>>& num_of_transitions_passes) {
+        STRACE(str_model_transducer,
+            if (is_trace_enabled(TraceTag::str_model_nfa)) {
+                tout << "Potentional initial states:";
+                for (mata::nft::State s : potentional_initial_states) {
+                    tout << " " << s;
+                }
+                tout << std::endl;
+            }
+        );
+        assert(nft.levels.num_of_levels == lengths.size());
+        assert(!nft.contains_jump_transitions());
+        if (potentional_initial_states.empty() || nft.final.empty()) { return std::nullopt; }
+        if (nft.initial.intersects_with(nft.final) && std::ranges::all_of(lengths, [](int x) { return x == 0; })) { return std::vector<mata::Word>(nft.levels.num_of_levels, mata::Word()); }
+        STRACE(str_model_transducer,
+            if (is_trace_enabled(TraceTag::str_model_nfa)) {
+                tout << "Transitions with number of times we have to pass them (some number can be shared):\n";
+                for (const auto& [trans, value] : num_of_transitions_passes) {
+                    tout << trans << " : " << *value << " " << value << "\n";
+                }
+            }
+        );
+
+        for (const mata::nft::State initial_state: potentional_initial_states) {
+            std::vector<mata::Word> result(lengths.size());
+            std::map<mata::nft::Transition,std::shared_ptr<unsigned>> cur_num_of_transitions_passes = num_of_transitions_passes;
+            /// Current state, its state post iterator, its end iterator, and iterator in the current symbol post to target states.
+            std::vector<std::tuple<mata::nft::State, mata::nft::StatePost::const_iterator, mata::nft::StatePost::const_iterator, mata::nft::StateSet::const_iterator>> worklist{};
+            auto is_result_correct = [&result, &lengths]() {
+                for (size_t i = 0; i < lengths.size(); ++i) {
+                    if (result[i].size() != lengths[i]) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+
+            const mata::nft::StatePost& initial_state_post{ nft.delta[initial_state] };
+            auto initial_symbol_post_it{ initial_state_post.cbegin() };
+            auto initial_symbol_post_end{ initial_state_post.cend() };
+
+            if (initial_symbol_post_it == initial_symbol_post_end) { continue; }
+
+            worklist.emplace_back(initial_state, initial_symbol_post_it, initial_symbol_post_end, initial_symbol_post_it->targets.cbegin());
+
+            while (!worklist.empty()) {
+                STRACE(str_model_transducer,
+                    if (is_trace_enabled(TraceTag::str_model_nfa)) {
+                        for (const auto& [state, _a, _b, _c] : worklist) {
+                            tout << state << " ";
+                        }
+                        tout << std::endl;
+                    }
+                );
+
+                // Using references to iterators to be able to increment the top-most element in the worklist in place.
+                auto& [cur_state, state_post_it, state_post_end, targets_it]{ worklist.back() };
+                if (state_post_it != state_post_end) {
+                    mata::Symbol cur_symbol = state_post_it->symbol;
+                    mata::nft::Level cur_level = nft.levels[cur_state];
+                    if (targets_it == state_post_it->targets.cend() || (cur_symbol != mata::nft::EPSILON && lengths[cur_level] == result[cur_level].size())) {
+                        ++state_post_it;
+                        if (state_post_it != state_post_end) { targets_it = state_post_it->cbegin(); }
+                    } else {
+                        mata::nft::Transition cur_transition{cur_state, cur_symbol, *targets_it};
+                        if (!cur_num_of_transitions_passes.contains(cur_transition) || *cur_num_of_transitions_passes.at(cur_transition) == 0) {
+                            ++targets_it;
+                        } else {
+                            if (cur_symbol != mata::nft::EPSILON) {
+                                result[cur_level].push_back(cur_symbol);
+                            }
+                            --(*cur_num_of_transitions_passes.at(cur_transition));
+                            if (nft.final.contains(*targets_it) && is_result_correct()) {
+                                return result;
+                            }
+                            const mata::nft::StatePost& state_post{ nft.delta[*targets_it] };
+                            if (!state_post.empty()) {
+                                auto new_state_post_it{ state_post.cbegin() };
+                                auto new_targets_it{ new_state_post_it->cbegin() };
+                                worklist.emplace_back(*targets_it, new_state_post_it, state_post.cend(), new_targets_it);
+                            } else {
+                                if (cur_symbol != mata::nft::EPSILON) {
+                                    result[cur_level].pop_back();
+                                }
+                                ++(*cur_num_of_transitions_passes.at(cur_transition));
+                                ++targets_it;
+                            }
+                        }
+                    }
+                } else { // state_post_it == state_post_end.
+                    worklist.pop_back();
+                    if (!worklist.empty()) {
+                        auto& [prev_state, prev_state_post_it, prev_state_post_end, prev_targets_it]{ worklist.back() };
+                        assert(prev_state_post_it != prev_state_post_end);
+                        mata::Symbol prev_symbol = prev_state_post_it->symbol;
+                        mata::nft::Level prev_level = nft.levels[prev_state];
+                        if (prev_symbol != mata::nft::EPSILON) {
+                            assert(!result[prev_level].empty() && result[prev_level].back() == prev_symbol);
+                            result[prev_level].pop_back();
+                        }
+                        assert(prev_targets_it != prev_state_post_it->targets.cend());
+                        mata::nft::Transition prev_transition{prev_state, prev_symbol, *prev_targets_it};
+                        ++(*cur_num_of_transitions_passes.at(prev_transition));
+                        ++prev_targets_it;
+                    }
+                }
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    bool has_quanfied_vars(ast_manager& m, expr* e) {
+        struct has_bound_var_proc {
+            bool found = false;
+            void operator()(expr* e) {
+                // Free variables are nulary applications --> is_app. 
+                // For the bounded variables De Bruijn indices are used (so they are basically numbers) --> is_var.
+                if (is_var(e)) // bound variable (quantified)
+                    found = true;
+            }
+        };
+
+        has_bound_var_proc proc;
+        for_each_expr(proc, e);
+        return proc.found;
+    }
+
+    bool has_quantifiers(ast_manager& m, expr* e) {
+        struct has_quantifier_proc {
+            bool found = false;
+            void operator()(expr* e) {
+                if (is_quantifier(e))
+                    found = true;
+            }
+        };
+
+        has_quantifier_proc proc;
+        for_each_expr(proc, e);
+        return proc.found;
     }
 }

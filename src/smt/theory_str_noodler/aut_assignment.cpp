@@ -52,7 +52,7 @@ namespace smt::noodler {
         return nfa;
     }
 
-    std::vector<interval_word> AutAssignment::get_interval_words(const mata::nfa::Nfa& aut) {
+    std::vector<IntervalWord> AutAssignment::get_interval_words(const mata::nfa::Nfa& aut) {
         assert(aut.initial.size() == 1); // is deterministic and accepts a non-empty language
         assert(aut.is_acyclic()); // accepts a finite language
 
@@ -66,11 +66,11 @@ namespace smt::noodler {
         // we compute the reachable interval words for each state that can be reached in n steps
 
         // maps all states q reachable in n steps (starting with n=0), into the vector of interval words with which we can reach the given state from the inital state
-        std::map<mata::nfa::State, std::vector<interval_word>> cur_level = { {*(aut.initial.begin()), {{}}} };
+        std::map<mata::nfa::State, std::vector<IntervalWord>> cur_level = { {*(aut.initial.begin()), {{}}} };
 
         while (true) {
             // we will compute the mapping for states reachable in n+1 steps
-            std::map<mata::nfa::State,std::vector<interval_word>> next_level;
+            std::map<mata::nfa::State,std::vector<IntervalWord>> next_level;
 
             for (auto const& [st, interval_words] : cur_level) {
                 // st - state reachable in n steps
@@ -223,31 +223,12 @@ namespace smt::noodler {
         return flat;
     }
 
-    mata::Symbol AutAssignment::add_fresh_symbol_to_alphabet() {
-        mata::Symbol new_symbol = regex::Alphabet(alphabet).get_unused_symbol();
-        this->alphabet.insert(new_symbol);
-        return new_symbol;
-    }
-
-
-    void AutAssignment::add_symbol_from_dummy(mata::Symbol sym) {
-        if(alphabet.contains(sym)) { return; }
-        bool is_there_some_dummy = false;
-        for (auto& [var, nfa] : *this) {
-            for (mata::nfa::State state = 0; state < nfa->num_of_states(); ++state) {
-                const mata::nfa::StatePost& delta_from_state = nfa->delta[state];
-                if (!delta_from_state.empty() && delta_from_state.back().symbol == util::get_dummy_symbol()) { // dummy symbol should be largest (we do not have epsilons), so should be at the back
-                    is_there_some_dummy = true;
-                    nfa->delta.add(state, sym, nfa->delta[state].back().targets);
-                }
-            }
-        }
-        if (is_there_some_dummy) {
-            alphabet.insert(sym);
-        }
-    }
-
     bool AutAssignment::replace_dummy_with_symbols(std::set<mata::Symbol> symbols) {
+        SASSERT(alphabet.contains(util::get_dummy_symbol()));
+        alphabet.erase(util::get_dummy_symbol());
+        for (const mata::Symbol symbol : symbols) {
+            alphabet.insert(symbol);
+        }
         bool is_there_some_dummy = false;
         for (auto& [var, nfa] : *this) {
             for (mata::nfa::State state = 0; state < nfa->num_of_states(); ++state) {
@@ -269,9 +250,9 @@ namespace smt::noodler {
     }
 
     std::optional<mata::Symbol> AutAssignment::replace_dummy_with_new_symbol() {
+        SASSERT(alphabet.contains(util::get_dummy_symbol()));
         mata::Symbol new_symbol = regex::Alphabet(alphabet).get_unused_symbol();
         if (replace_dummy_with_symbols({new_symbol})) {
-            alphabet.insert(new_symbol);
             return new_symbol;
         } else {
             return std::nullopt;

@@ -49,7 +49,6 @@ z3_add_component(smt
     smt_value_sort.cpp
     smt2_extra_cmds.cpp
     theory_arith.cpp
-    theory_array_bapa.cpp
     theory_array_base.cpp
     theory_array.cpp
     theory_array_full.cpp
@@ -68,13 +67,12 @@ z3_add_component(smt
     theory_recfun.cpp
     theory_seq.cpp
     theory_sls.cpp
-    theory_special_relations.cpp
-    theory_str.cpp
     theory_str_noodler/theory_str_noodler.cpp
     theory_str_noodler/theory_str_noodler_final_check.cpp
     theory_str_noodler/theory_str_noodler_model.cpp
     theory_str_noodler/formula_preprocess.cpp
     theory_str_noodler/inclusion_graph.cc
+    theory_str_noodler/solving_state.cpp
     theory_str_noodler/decision_procedure.cpp
     theory_str_noodler/nielsen_decision_procedure.cpp
     theory_str_noodler/memb_heuristics_procedures.cpp
@@ -89,8 +87,8 @@ z3_add_component(smt
     theory_str_noodler/counter_automaton.cpp
     theory_str_noodler/ca_str_constr.cpp
     theory_str_noodler/unary_decision_procedure.cpp
-    theory_str_mc.cpp
-    theory_str_regex.cpp
+    theory_str_noodler/conversion_handler.cpp
+    theory_special_relations.cpp    
     theory_user_propagator.cpp
     theory_utvpi.cpp
     theory_wmaxsat.cpp

@@ -30,6 +30,7 @@ public:
     mpq(int v) : m_num(v) {}
     mpq() = default;
     mpq(mpq &&) noexcept = default;
+    mpq(mpz && n) noexcept : m_num(std::move(n)) {}
     mpq & operator=(mpq&&) = default;
     mpq & operator=(mpq const&) = delete;
     mpz const & numerator() const { return m_num; }
@@ -213,6 +214,8 @@ public:
     std::string to_rational_string(numeral const & a) { return to_string(a); }
 
     std::string to_string(mpz const & a) const { return mpz_manager<SYNCH>::to_string(a); }
+
+    std::string to_string_decimal(mpq const & a, mpz const & prec);
 
     void display(std::ostream & out, mpz const & a) const { return mpz_manager<SYNCH>::display(out, a); }
 
@@ -557,6 +560,8 @@ public:
         SASSERT(is_int(a) && is_int(b));
         mod(a.m_num, b.m_num, c);
     }
+
+    mpz mod2k(mpz const & a, unsigned k) { return mpz_manager<SYNCH>::mod2k(a, k); }
 
     static unsigned hash(mpz const & a) { return mpz_manager<SYNCH>::hash(a); }
 

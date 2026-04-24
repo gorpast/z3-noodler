@@ -387,7 +387,7 @@ public:
      */
     ParikhImageTransducer(const mata::nft::Nft& nft, std::vector<BasicTerm> tape_vars, std::set<BasicTerm> vars_that_need_symbol_mapping = {}) 
         : ParikhImage(nft.to_nfa_copy()), nft(nft), tape_vars(tape_vars), vars_that_need_symbol_mapping(vars_that_need_symbol_mapping) {
-            SASSERT(nft.num_of_levels == tape_vars.size());
+            SASSERT(nft.levels.num_of_levels == tape_vars.size());
         }
 
     /**
@@ -395,7 +395,7 @@ public:
      */
     BasicTerm get_tape_var_for_symbol_mapping(const BasicTerm& tape_var, mata::Symbol symbol) const {
         SASSERT(vars_that_need_symbol_mapping.contains(tape_var));
-        return BasicTerm{ BasicTermType::Variable, zstring(tape_var.get_name() + "!symbolmappingfor" + zstring(rational(symbol))) };
+        return util::mk_internal_noodler_var(zstring(tape_var.get_name() + "symbolmappingfor" + zstring(rational(symbol))));
     }
 
     /**

@@ -1,5 +1,6 @@
 #include "smt/smt_context.h"
 #include "smt/smt_model_generator.h"
+#include "model/seq_factory.h"
 
 #include "theory_str_noodler.h"
 #include "decision_procedure.h"
@@ -16,13 +17,14 @@ namespace smt::noodler {
         noodler_var_value_proc(BasicTerm str_var, theory_str_noodler& th) : str_var(str_var), needed_vars(th.dec_proc->get_len_vars_for_model(str_var)), th(th) {}
 
         void get_dependencies(buffer<model_value_dependency> & result) override {
-            for (const BasicTerm& var : needed_vars) {
+            for (const BasicTerm& var : needed_vars) { // we assume that all needed_vars are either string or int variables
+                SASSERT(var.get_type() == BasicTermType::Variable);
                 expr_ref arith_var(th.m);
                 // the following is similar to code in len_node_to_z3_formula()
                 if(!th.var_name.contains(var)) {
                     // if the variable is not found, it was introduced in the preprocessing/decision procedure
                     // (either as a string or int var), i.e. we can just create a new z3 variable with the same name 
-                    arith_var = th.mk_int_var(var.get_name().encode());
+                    arith_var = th.m.mk_skolem_const(symbol(var.get_name().encode()), th.m_util_a.mk_int());
                 } else {
                     arith_var = th.var_name.at(var); // for int var, we just take the var
                     if (th.m_util_s.is_string(arith_var->get_sort())) {
@@ -45,8 +47,12 @@ namespace smt::noodler {
                 STRACE(str_model, tout << "Arith model of " << needed_vars[i] << " is " << val << std::endl;);
                 var_to_arith_model[needed_vars[i]] = val;
             }
-
-            return th.m_util_s.str.mk_string(th.dec_proc->get_model(str_var, var_to_arith_model));
+            zstring s = th.dec_proc->get_model(str_var, var_to_arith_model);
+            expr* v = th.m_util_s.str.mk_string(s);
+            if (th.m_seq_factory) {
+                th.m_seq_factory->register_value(v);
+            }
+            return to_app(v);
         }
     };
 
@@ -74,7 +80,18 @@ namespace smt::noodler {
     
         app * mk_value(model_generator & m, expr_ref_vector const & values) override {
             if (!length_relevant) {
-                // because the length is not relevant, we can return anything, so we return empty string
+                // because the length is not relevant, we can return any string; let the
+                // standard sequence factory pick a fresh value when available, to avoid
+                // collapsing the string universe to a single element.
+                // try to obtain the seq_factory from the proto_model owned by
+                // the model generator and use it to pick a fresh string value
+                // when available.
+                proto_model& mdl = m.get_model();
+                value_factory* vf = mdl.get_factory(m_util_s.get_family_id());
+                if (auto* f = dynamic_cast<seq_factory*>(vf)) {
+                    expr* v = f->get_fresh_value(m_util_s.str.mk_string_sort());
+                    return to_app(v);
+                }
                 return m_util_s.str.mk_string(zstring());
             } else {
                 // values[0] contain the length of str_var, so we return some string of this length
@@ -82,8 +99,32 @@ namespace smt::noodler {
                 rational val(0);
                 SASSERT(values.size() == 1);
                 VERIFY(m_util_a.is_numeral(values[0], val, is_int) && is_int);
-                std::vector<unsigned> res(val.get_unsigned(), 'a'); // we can return anything, so we will just fill it with 'a'
-                return m_util_s.str.mk_string(zstring(res.size(), res.data()));
+                // part for getting a model that could work also for quantified formulae
+                // We want to avoid getting models of this form:
+                // sat
+                // (
+                //   ;; universe for String:
+                //   ;;   String!val!0 
+                //   ;; -----------
+                //   ;; definitions for universe elements:
+                //   (declare-fun String!val!0 () String)
+                //   ;; cardinality constraint:
+                //   (forall ((x String)) (= x String!val!0))
+                //   ;; -----------
+                //   (define-fun v0 () String
+                //     "\u{0}")
+                //   (define-fun fun0 ((x!0 String) (x!1 String) (x!2 Int)) String
+                //     (ite (and (= x!0 "\u{0}") (= x!1 ".")) "\u{0}" String!val!0))
+                // )
+                unsigned len = val.get_unsigned();
+                std::vector<unsigned> res(len, 'a');
+                expr* v = m_util_s.str.mk_string(zstring(res.size(), res.data()));
+                proto_model& mdl = m.get_model();
+                value_factory* vf = mdl.get_factory(m_util_s.get_family_id());
+                if (auto* f = dynamic_cast<seq_factory*>(vf)) {
+                    f->register_value(v);
+                }
+                return to_app(v);
             }
         }
     };
@@ -124,7 +165,13 @@ namespace smt::noodler {
                 VERIFY(m_util_s.str.is_string(value, value_string));
                 res = res + value_string;
             }
-            return m_util_s.str.mk_string(res);
+            expr* v = m_util_s.str.mk_string(res);
+            proto_model& mdl = m.get_model();
+            value_factory* vf = mdl.get_factory(m_util_s.get_family_id());
+            if (auto* f = dynamic_cast<seq_factory*>(vf)) {
+                f->register_value(v);
+            }
+            return to_app(v);
         }
     };
 
@@ -140,10 +187,32 @@ namespace smt::noodler {
         }
     }
 
+    app* theory_str_noodler::get_ite_value(expr* e) const {
+        // The following code is the same as in theory_seq::get_ite_value()
+        expr* e1, *e2, *e3;
+        while (m.is_ite(e, e1, e2, e3)) {        
+            if (!ctx.e_internalized(e))
+                break;
+            enode* r = ctx.get_enode(e)->get_root();
+            if (ctx.get_enode(e2)->get_root() == r) {
+                e = e2;
+            }
+            else if (ctx.get_enode(e3)->get_root() == r) {
+                e = e3;
+            }
+            else {
+                break;
+            }
+        }
+        return to_app(e);
+    }
+
     model_value_proc* theory_str_noodler::mk_value(enode *const n, model_generator &mg) {
         // it seems here we only get string literals/vars, concats (whose arguments can be something more complex, but should be replacable by a var), from_int/from_code and regex literals/vars (vars probably not, only if we fix disequations with unrestricted regex vars)
         app *tgt = n->get_expr();
         STRACE(str, tout << "mk_value: getting model for " << mk_pp(tgt, m) << " sort is " << mk_pp(tgt->get_sort(), m) << "\n";);
+
+        tgt = get_ite_value(tgt);
 
         if (m_util_s.is_re(tgt)) {
             // if tgt is regular
@@ -155,6 +224,7 @@ namespace smt::noodler {
                 return alloc(expr_wrapper_proc, tgt);
             }
         } else if (m_util_s.str.is_string(tgt)) {
+            // TODO: use seq_factory to register string literal?
             // for string literal, we just return the string
             return alloc(expr_wrapper_proc, tgt);
         } else if (util::is_str_variable(tgt, m_util_s)) {
@@ -186,9 +256,15 @@ namespace smt::noodler {
 
     void theory_str_noodler::init_model(model_generator &mg) {
         STRACE(str, tout << "init_model\n");
+        if (!m_seq_factory) {
+            m_seq_factory = alloc(seq_factory, m, m_util_s.get_family_id(), mg.get_model());
+            mg.register_factory(m_seq_factory);
+        }
     }
 
     void theory_str_noodler::finalize_model(model_generator &mg) {
         STRACE(str, tout << "finalize_model\n";);
+        // factory lifetime is managed by the model; just clear our pointer
+        m_seq_factory = nullptr;
     }
 }

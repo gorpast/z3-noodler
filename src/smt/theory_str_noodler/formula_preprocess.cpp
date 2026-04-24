@@ -107,9 +107,8 @@ namespace smt::noodler {
      */
     bool FormulaVar::single_occurr(const std::set<BasicTerm>& items) const {
         for(const BasicTerm& t : items) {
-            if(t.get_type() != BasicTermType::Variable)
+            if (!t.is_variable())
                 continue;
-            assert(t.get_type() == BasicTermType::Variable);
             if(this->varmap.at(t).size() > 1) {
                 return false;
             }
@@ -347,19 +346,18 @@ namespace smt::noodler {
                 this->add_to_len_formula(pr.second.get_formula_eq());
             }
 
+            this->formula.remove_predicate(pr.first);
+            removed.insert(pr.first);
+
             if(is_right_side_conv) {
                 // if we also have that Y is conversion var, then there cannot be any literals around
                 // and we can add Y -> X to subst map (+ propagate that X is also conversion var)
                 this->conversion_vars.insert(left_var);
-                this->substitution_map[pr.second.get_right_side()[0]] = {left_var};
+                substitute_var(pr.second.get_right_side()[0], {left_var});
             } else {
                 // otherwise we do not need to put anything in substitution map and we just need to remember the inclusion for model generation
                 removed_inclusions_for_model.push_back(pr.second);
             }
-
-            this->formula.remove_predicate(pr.first);
-            removed.insert(pr.first);
-            STRACE(str_prep_remove_regular, tout << "removed" << std::endl;);
 
             // check if by removing the regular equation, some other equations did not become regular
             // we only need to check this for left_var, as the variables from the right side do not occur
@@ -373,6 +371,40 @@ namespace smt::noodler {
                     map_set_insert(this->dependency, occurrs.begin()->pred_index, pr.first);
                 }
             }
+        }
+        STRACE(str_prep, tout << print_info(is_trace_enabled(TraceTag::str_nfa)));
+    }
+
+    /**
+     * @brief Replace singleton variables with their unique literal word.
+     * This allows the align_literals mechanism in the length procedure to detect
+     * content incompatibilities between singleton-constrained variables and literals.
+     */
+    void FormulaPreprocessor::propagate_singletons() {
+        STRACE(str_prep, tout << "Preprocessing step - propagate_singletons\n";);
+        std::set<BasicTerm> all_vars;
+        for (const Predicate& pr : this->formula.get_predicates_set()) {
+            auto vars = pr.get_vars();
+            all_vars.insert(vars.begin(), vars.end());
+        }
+        std::vector<std::pair<BasicTerm, zstring>> singletons;
+        for (const BasicTerm& v : all_vars) {
+            if (!this->aut_ass.count(v)) continue;
+            mata::nfa::Nfa aut = *this->aut_ass.at(v);
+            aut.trim();
+            zstring found_literal;
+            // aut_encodes_literal rejects automata with dummy-symbol transitions,
+            // preventing false positives for variables constrained to re.allchar
+            // over a collapsed (dummy) alphabet.
+            if (AutAssignment::aut_encodes_literal(mata::nfa::reduce(aut), found_literal)) {
+                singletons.push_back({v, found_literal});
+            }
+        }
+        for (const auto& [v, word_str] : singletons) {
+            BasicTerm lit(BasicTermType::Literal, word_str);
+            this->aut_ass[lit] = this->aut_ass.at(v);
+            this->formula.replace({v}, {lit});
+            substitute_var(v, {lit});
         }
         STRACE(str_prep, tout << print_info(is_trace_enabled(TraceTag::str_nfa)));
     }
@@ -415,7 +447,7 @@ namespace smt::noodler {
                 this->formula.replace(eq.get_left_side(), eq.get_right_side());
                 this->formula.remove_predicate(index);
                 this->add_to_len_formula(eq.get_formula_eq());
-                substitution_map[v_left] = {eq.get_right_side()[0]};
+                substitute_var(v_left, {eq.get_right_side()[0]});
                 continue;
             }
 
@@ -434,8 +466,8 @@ namespace smt::noodler {
             }
 
             this->formula.replace(eq.get_right_side(), eq.get_left_side()); // find Y, replace for X
-            substitution_map[v_right] = {v_left}; // subst_map[Y] = X (the length constraint |X| = |Y| is already there)
             this->formula.remove_predicate(index);
+            substitute_var(v_right, {v_left}); // subst_map[Y] = X (the length constraint |X| = |Y| is already there)
 
             // update dependencies (overapproximation). Each remaining predicat depends on the removed one.
             for(const auto& pr : this->formula.get_predicates()) {
@@ -1720,22 +1752,33 @@ namespace smt::noodler {
     /**
      * @brief Adds restrictions from conversions to the len_formula, so that (underapproximating) unsat check can be better
      * 
-     * Specifically, it checks if for to_code(x)/to_int(x) there is any valid word in the language of automaton for x, i.e,
-     * some one-symbol word for to_code(x) or some word containing only digits for to_int(x).
+     * Specifically, it checks if for to_code(x)/to_int(x)/to_real(x) there is any valid word in the language of automaton
+     * for x, i.e, some one-symbol word for to_code(x) or some word containing only digits for to_int(x) or some word
+     * containing only digits with possibly one decimal for to_real(x).
      * 
-     * @param conversions 
+     * @param conversions
      */
-    void FormulaPreprocessor::conversions_validity(std::vector<TermConversion>& conversions) {
+    void FormulaPreprocessor::conversions_validity(const std::vector<TermConversion>& conversions) {
         STRACE(str_prep, tout << "Preprocessing step - conversions_validity\n";);
         mata::nfa::Nfa sigma_aut = aut_ass.sigma_automaton();
         mata::nfa::Nfa only_digits_aut = AutAssignment::digit_automaton();
+        mata::nfa::Nfa only_digits_or_with_decimal_aut = AutAssignment::decimal_automaton();
+        only_digits_or_with_decimal_aut.final.insert(0);
+        
 
         for (const auto& conv : conversions) {
-            if ((conv.type == ConversionType::TO_CODE && mata::nfa::reduce(mata::nfa::intersection(sigma_aut,       *aut_ass.at(conv.string_var))).is_lang_empty()) ||
-                (conv.type == ConversionType::TO_INT  && mata::nfa::reduce(mata::nfa::intersection(only_digits_aut, *aut_ass.at(conv.string_var))).is_lang_empty()))
-                {
-                    len_formula.succ.emplace_back(LenFormulaType::EQ, std::vector<LenNode>{conv.int_var, -1});
-                }
+            BasicTerm subst_var = conv.string_var;
+            if (substitution_map.contains(conv.string_var)) {
+                const Concat& substituted_vars = substitution_map.at(conv.string_var);
+                if (substituted_vars.size() != 1) { continue; }
+                else { subst_var = substituted_vars.at(0); }
+            }
+            if ((conv.type == ConversionType::TO_CODE && mata::nfa::reduce(mata::nfa::intersection(sigma_aut,                       *aut_ass.at(subst_var))).is_lang_empty()) ||
+                (conv.type == ConversionType::TO_INT  && mata::nfa::reduce(mata::nfa::intersection(only_digits_aut,                 *aut_ass.at(subst_var))).is_lang_empty()) ||
+                (conv.type == ConversionType::TO_REAL && mata::nfa::reduce(mata::nfa::intersection(only_digits_or_with_decimal_aut, *aut_ass.at(subst_var))).is_lang_empty()))
+            {
+                len_formula.succ.emplace_back(LenFormulaType::EQ, std::vector<LenNode>{conv.number_var, -1});
+            }
         }
         STRACE(str_prep, tout << print_info(is_trace_enabled(TraceTag::str_nfa)));
     }
@@ -1825,25 +1868,22 @@ namespace smt::noodler {
             }
             // TODO: for simplicity, we assume only one input variable in the concatenation. It could be generalized 
             // to multiple input variables by concatenating NFAs for them, removing epsilons and composing with the transducer.
-            if(pred.get_left_side().size() > 1) {
+            if(pred.get_left_side().size() > 1 || pred.get_left_side().empty()) {
                 continue;
             }
-            mata::nft::Nft nft = *(trans[0]);
 
-            auto nfa = this->aut_ass.at(pred.get_left_side()[0]);
-
-            // restrict the input variable --> T_1(Aut(x), y)
-            // it is not necessary for correctness, but it makes the heuristics later more succesful
-            mata::nft::Nft lang_nft(*nfa, 2);
-            nft = mata::nft::compose(lang_nft, nft, 0, 0, true);
-            // compose first tapes of all transducers with identical parameters (and project out the synchronizing tape)
-            // nft = [T_1(y), T_2(y), ...]
-            for(size_t i = 1; i < trans.size(); i++) {
-                auto tr = mata::nft::compose(lang_nft, *trans[i], 0, 0, true);
-                nft = mata::nft::compose(nft, tr, 0, 0, true);
+            // Taking
+            //    T_1(x,y), T_2(x,y), T_3(x,y), ...
+            // we construct T_y(y_1, y_2, ...) by intersecting on the input variable of
+            // each T_i starting with the automaton for x.
+            mata::nft::Nft nft_for_y_tapes(*(this->aut_ass.at(pred.get_left_side()[0])));
+            for(size_t i = 0; i < trans.size()-1; i++) {
+                nft_for_y_tapes = mata::nft::compose(nft_for_y_tapes, *trans[i], 0, 0, false, mata::nft::JumpMode::NoJump);
             }
+            // last composition will remove the x tape
+            nft_for_y_tapes = mata::nft::compose(nft_for_y_tapes, *trans.back(), 0, 0, true, mata::nft::JumpMode::NoJump);
 
-            if(util::contains_trans_identity(nft, 4) == l_false) {
+            if(util::contains_trans_identity(nft_for_y_tapes, 4) == l_false) {
                 return true;
             }
         }
@@ -1896,10 +1936,16 @@ namespace smt::noodler {
                         for(const size_t & i : rem_ids) {
                             this->formula.remove_predicate(i);
                         }
-                        // add 'a' (some literal) to the end of haystacks
-                        haystacks.emplace_back(BasicTermType::Literal, zstring(*this->aut_ass.get_alphabet().begin()));
+                        // add 'a' (we can add any random symbol) to the end of haystacks
+                        haystacks.emplace_back(BasicTermType::Literal, zstring("a"));
                         // add the inclusion u1.u2.u3...uN.'a' ⊆ x to removed_inclusions_for_model
                         this->removed_inclusions_for_model.push_back(Predicate::create_equation(haystacks, {needle_var}));
+                        // update also the language of x, to accept anything containing 'a' ('a' might not be in the alphabet of aut_ass)
+                        mata::EnumAlphabet alph = aut_ass.get_alphabet().get_mata_alphabet();
+                        alph.add_new_symbol(mata::Symbol('a'));
+                        mata::nfa::Nfa sigma_star_with_a = mata::nfa::builder::create_sigma_star_nfa(&alph);
+                        sigma_star_with_a.alphabet = nullptr; // remove alphabet because otherwise mata will start to make problems
+                        aut_ass[needle_var] = std::make_shared<mata::nfa::Nfa>(sigma_star_with_a);
                         something_changed = true;
                         break;
                     }
@@ -1945,6 +1991,26 @@ namespace smt::noodler {
         return false;
     }
 
+    void FormulaPreprocessor::substitute_var(const BasicTerm& var, const Concat& replace) {
+        for (auto& [subst_var, subst_replace] : substitution_map) {
+            Concat new_replace;
+            for (const BasicTerm& bt : subst_replace) {
+                if (bt == var) {
+                    new_replace.insert(new_replace.end(), replace.begin(), replace.end());
+                } else {
+                    new_replace.push_back(bt);
+                }
+            }
+            subst_replace = std::move(new_replace);
+        }
+        substitution_map[var] = replace;
+        /* TODO: It makes sense to delete aut_ass[var] as it is substituted, but we cannot do it, as aut_ass[var] can
+         * be empty (meaning that preprocessing decided unsat). We should be checking for unsat after every step instead.
+         */
+        // aut_ass.erase(var);
+        formula.remove_var_from_varmap(var);
+    }
+
     std::string FormulaPreprocessor::print_info(bool print_nfas) {
         std::stringstream res;
         res << "Current formula:\n";
@@ -1960,7 +2026,7 @@ namespace smt::noodler {
                 res << "NFA\n";
             }
         }
-        res << "Current substition map:\n";
+        res << "Current substitution map:\n";
         for (const auto& [var, subst] : substitution_map) {
             res << var << " ->";
             for (const auto& subst_var : subst) {

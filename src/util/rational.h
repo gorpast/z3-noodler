@@ -51,10 +51,10 @@ public:
     explicit rational(unsigned n) { m().set(m_val, n); }
       
     rational(int n, int d) { m().set(m_val, n, d); }
-
     rational(mpq const & q) { m().set(m_val, q); }
-
+    rational(mpq && q) noexcept : m_val(std::move(q)) {}
     rational(mpz const & z) { m().set(m_val, z); }
+    rational(mpz && z) noexcept : m_val(std::move(z)) {}
 
     explicit rational(double  z) { UNREACHABLE(); }
     
@@ -93,6 +93,8 @@ public:
     void swap(rational & n) noexcept { m().swap(m_val, n.m_val); }
     
     std::string to_string() const { return m().to_string(m_val); }
+
+    std::string to_string_decimal(rational const & prec) const { SASSERT(prec.is_int() && prec.is_nonneg()); return m().to_string_decimal(m_val, prec.m_val.numerator()); }
 
     void display(std::ostream & out) const { return m().display(out, m_val); }
     
@@ -274,8 +276,8 @@ public:
     }
 
     friend inline rational mod2k(rational const & a, unsigned k) {
-        if (a.is_nonneg() && a.is_int() && a.bitsize() <= k) 
-            return a;
+        if (a.is_int())
+            return rational::m().mod2k(a.m_val.numerator(), k);
         return mod(a, power_of_two(k));
     }
 

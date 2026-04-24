@@ -72,6 +72,22 @@ namespace smt::noodler {
         return true;
     }
 
+    template<typename T>
+    bool set_disjoint(const std::set<T>& t1, const std::set<T>& t2) {
+        if (t1.size() < t2.size()) {
+            for(const auto& t : t1) {
+                if(t2.contains(t))
+                    return false;
+            }
+        } else {
+            for(const auto& t : t2) {
+                if(t1.contains(t))
+                    return false;
+            }
+        }
+        return true;
+    }
+
     template<typename T, typename S, typename P>
     std::set<S> set_map(const std::set<T>& st, P pred) {
         std::set<S> ret;
@@ -301,6 +317,8 @@ namespace smt::noodler {
         void clean_varmap();
         void clean_predicates();
 
+        void remove_var_from_varmap(const BasicTerm& var) { SASSERT(!var_occurs(var)); varmap.erase(var); };
+
         /**
          * @brief Increment index pointing to a side (taking into account that left side has negative numbers
          * from 1 and right side positive numbers from 1).
@@ -335,7 +353,7 @@ namespace smt::noodler {
 
         LenNode len_formula;
         std::unordered_set<BasicTerm> len_variables;
-        std::unordered_set<BasicTerm> conversion_vars; // all conversion vars should always be also in len vars, also it should not contain literals
+        std::set<BasicTerm> conversion_vars; // all conversion vars should always be also in len vars, also it should not contain literals
 
         const theory_str_noodler_params& m_params;
 
@@ -363,9 +381,10 @@ namespace smt::noodler {
         bool can_unify(const Concat& con1, const Concat& con2, const std::function<bool(const Concat&, const Concat&)> &check) const;
         TermReplaceMap construct_replace_map() const;
 
+        void substitute_var(const BasicTerm& var, const Concat& replace);
 
     public:
-        FormulaPreprocessor(Formula conj, AutAssignment ass, std::unordered_set<BasicTerm> lv, const theory_str_noodler_params &par, std::unordered_set<BasicTerm> conversion_vars) :
+        FormulaPreprocessor(Formula conj, AutAssignment ass, std::unordered_set<BasicTerm> lv, const theory_str_noodler_params &par, std::set<BasicTerm> conversion_vars) :
             formula(conj),
             fresh_var_cnt(0),
             aut_ass(ass),
@@ -392,6 +411,7 @@ namespace smt::noodler {
 
         void remove_regular();
         void propagate_variables();
+        void propagate_singletons();
         void propagate_eps();
         void generate_identities();
         void reduce_regular_sequence(unsigned mn);
@@ -404,7 +424,7 @@ namespace smt::noodler {
         void infer_alignment();
         void common_prefix_propagation();
         void common_suffix_propagation();
-        void conversions_validity(std::vector<TermConversion>& conversions);
+        void conversions_validity(const std::vector<TermConversion>& conversions);
         bool has_unsat_transducers();
 
         void underapprox_var_language(const BasicTerm& var);

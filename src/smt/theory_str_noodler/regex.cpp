@@ -13,7 +13,46 @@ namespace {
 
 namespace smt::noodler::regex {
 
-    void extract_symbols(expr* const ex, const seq_util& m_util_s, std::set<uint32_t>& alphabet) {
+    mata::Symbol Alphabet::get_unused_symbol() const {
+        if (is_full()) {
+            // alphabet is full, we throw error (TODO: should probably return nullopt or something like that)
+            util::throw_error("Trying to get a fresh symbol in full alphabet");
+            return 0; // this is unreachable, return something so we can compile
+        }
+
+        // We want to find first "nice" character where we go in this order
+        //  - lowercase a-z
+        //  - uppercase A-Z
+        //  - digits 0-9
+        //  - printable ASCII characters except space
+        //  - space
+        //  - ASCII control codes 0-31
+        //  - ASCII control code DEL (127)
+        //  - anything over 127, always incrementing by one
+        auto get_next_symbol = [](const mata::Symbol s) {
+            if (s == zstring::max_char()) { util::throw_error("Trying to get a fresh symbol in full alphabet"); return mata::Symbol{0}; }
+            else if (s == 'z') { return mata::Symbol{'A'}; } // lowercase is followed by uppercase
+            else if (s == 'Z') { return mata::Symbol{'0'}; } // uppercase is followed by digits
+            else if (s == '9') { return mata::Symbol{33}; } // digits are followed by printable ASCII characters (starting with '!')
+            else if (s == 47) { return mata::Symbol{58}; } // we are in printable ASCII characters, jumping over digits 0-9
+            else if (s == 64) { return mata::Symbol{91}; } // we are in printable ASCII characters, jumping over uppercase A-Z
+            else if (s == 96) { return mata::Symbol{123}; } // we are in printable ASCII characters, jumping over lowercase a-z
+            else if (s == 126) { return mata::Symbol{32}; } // last printable ASCII character, return space
+            else if (s == 32) { return mata::Symbol{0}; } // space is followed by ASCII contol codes 0-31
+            else if (s == 31) { return mata::Symbol{127}; } // last control code in 0-31 followed by DEL (127)
+            else { return s+1; }
+        };
+
+        mata::Symbol current_symbol{'a'}; // start with 'a'
+
+        while (alphabet.contains(current_symbol)) {
+            current_symbol = get_next_symbol(current_symbol);
+        }
+
+        return current_symbol;
+    }
+
+    void extract_symbols(expr* const ex, const seq_util& m_util_s, Alphabet& alphabet) {
         if (m_util_s.str.is_string(ex)) {
             auto ex_app{ to_app(ex) };
             SASSERT(ex_app->get_num_parameters() == 1);
@@ -89,12 +128,17 @@ namespace smt::noodler::regex {
             SASSERT(ex_app->get_num_args() == 2);
             const auto range_begin{ ex_app->get_arg(0) };
             const auto range_end{ ex_app->get_arg(1) };
-            SASSERT(is_app(range_begin));
-            SASSERT(is_app(range_end));
-            const auto range_begin_value{ to_app(range_begin)->get_parameter(0).get_zstring()[0] };
-            const auto range_end_value{ to_app(range_end)->get_parameter(0).get_zstring()[0] };
 
-            auto current_value{ range_begin_value };
+            zstring range_begin_string;
+            zstring range_end_string;
+            if (!m_util_s.str.is_string(range_begin, range_begin_string) || !m_util_s.str.is_string(range_end, range_end_string)) {
+                util::throw_error("We can extract symbols from range only if both range endpoints are string literals");
+            }
+            SASSERT(range_begin_string.length() == 1 && range_end_string.length() == 1);
+            const unsigned range_begin_value = range_begin_string[0];
+            const unsigned range_end_value = range_end_string[0];
+
+            unsigned current_value{ range_begin_value };
             while (current_value <= range_end_value) {
                 alphabet.insert(current_value);
                 ++current_value;
@@ -204,7 +248,7 @@ namespace smt::noodler::regex {
                         // According to make_complement, we do complement at the end, so we just invert it
                         make_complement = !make_complement;
                     } else {
-                        result = mata::nfa::complement(result, alphabet.mata_alphabet, {{"algorithm", "classical"}});
+                        result = mata::nfa::complement(result, alphabet.get_mata_alphabet(), {{"algorithm", "classical"}});
                     }
                 } else if (m_util_s.re.is_derivative(cur_expr)) { // Handle derivative.
                     util::throw_error("derivative is unsupported");
@@ -213,7 +257,7 @@ namespace smt::noodler::regex {
                 } else if (m_util_s.re.is_dot_plus(cur_expr)) { // Handle dot plus.
                     result.initial.insert(0);
                     result.final.insert(1);
-                    for (const auto& symbol : alphabet.alphabet) {
+                    for (const auto& symbol : alphabet) {
                         result.delta.add(0, symbol, 1);
                         result.delta.add(1, symbol, 1);
                     }
@@ -224,13 +268,13 @@ namespace smt::noodler::regex {
                 } else if (m_util_s.re.is_full_char(cur_expr)) { // Handle full char (single occurrence of any string symbol, '.').
                     result.initial.insert(0);
                     result.final.insert(1);
-                    for (const auto& symbol : alphabet.alphabet) {
+                    for (const auto& symbol : alphabet) {
                         result.delta.add(0, symbol, 1);
                     }
                 } else if (m_util_s.re.is_full_seq(cur_expr)) {
                     result.initial.insert(0);
                     result.final.insert(0);
-                    for (const auto& symbol : alphabet.alphabet) {
+                    for (const auto& symbol : alphabet) {
                         result.delta.add(0, symbol, 0);
                     }
                 } else if (m_util_s.re.is_intersection(cur_expr)) { // Handle intersection.
@@ -275,7 +319,7 @@ namespace smt::noodler::regex {
                             // ... or empty language
                             result = std::move(body_nfa);
                         }
-                    } else if(body_nfa.is_universal(alphabet.mata_alphabet)) {
+                    } else if(body_nfa.is_universal(alphabet.get_mata_alphabet())) {
                         result = std::move(body_nfa);
                     } else {
                         body_nfa.unify_final();
@@ -336,10 +380,15 @@ namespace smt::noodler::regex {
                     SASSERT(cur_expr->get_num_args() == 2);
                     const auto range_begin{ cur_expr->get_arg(0) };
                     const auto range_end{ cur_expr->get_arg(1) };
-                    SASSERT(is_app(range_begin));
-                    SASSERT(is_app(range_end));
-                    const auto range_begin_value{ to_app(range_begin)->get_parameter(0).get_zstring()[0] };
-                    const auto range_end_value{ to_app(range_end)->get_parameter(0).get_zstring()[0] };
+
+                    zstring range_begin_string;
+                    zstring range_end_string;
+                    if (!m_util_s.str.is_string(range_begin, range_begin_string) || !m_util_s.str.is_string(range_end, range_end_string)) {
+                        util::throw_error("We can extract symbols from range only if both range endpoints are string literals");
+                    }
+                    SASSERT(range_begin_string.length() == 1 && range_end_string.length() == 1);
+                    const unsigned range_begin_value = range_begin_string[0];
+                    const unsigned range_end_value = range_end_string[0];
 
                     result.initial.insert(0);
                     result.final.insert(1);
@@ -418,7 +467,7 @@ namespace smt::noodler::regex {
         // Whether to create complement of the final automaton.
         if (make_complement) {
             STRACE(str_create_nfa, tout << "Complemented NFA:" << std::endl;);
-            final_result = mata::nfa::complement(final_result, alphabet.mata_alphabet, { 
+            final_result = mata::nfa::complement(final_result, alphabet.get_mata_alphabet(), { 
                 {"algorithm", "classical"}, 
                 //{"minimize", "true"} // it seems that minimizing during complement causes more TOs in benchmarks
                 });
@@ -556,10 +605,15 @@ namespace smt::noodler::regex {
             SASSERT(expression->get_num_args() == 2);
             const auto range_begin{ expression->get_arg(0) };
             const auto range_end{ expression->get_arg(1) };
-            SASSERT(is_app(range_begin));
-            SASSERT(is_app(range_end));
-            const auto range_begin_value{ to_app(range_begin)->get_parameter(0).get_zstring()[0] };
-            const auto range_end_value{ to_app(range_end)->get_parameter(0).get_zstring()[0] };
+
+            zstring range_begin_string;
+            zstring range_end_string;
+            if (!m_util_s.str.is_string(range_begin, range_begin_string) || !m_util_s.str.is_string(range_end, range_end_string)) {
+                util::throw_error("We can extract symbols from range only if both range endpoints are string literals");
+            }
+            SASSERT(range_begin_string.length() == 1 && range_end_string.length() == 1);
+            const unsigned range_begin_value = range_begin_string[0];
+            const unsigned range_end_value = range_end_string[0];
 
             // min_length: if there is some symbol in range --> min_length = 1; otherwise min_length = 0 (empty)
             // empty:  if there is some symbol in range --> false; otherwise true
@@ -739,10 +793,16 @@ namespace smt::noodler::regex {
             SASSERT(regex->get_num_args() == 2);
             const auto range_begin{ regex->get_arg(0) };
             const auto range_end{ regex->get_arg(1) };
-            SASSERT(is_app(range_begin));
-            SASSERT(is_app(range_end));
-            const auto range_begin_value{ to_app(range_begin)->get_parameter(0).get_zstring()[0] };
-            const auto range_end_value{ to_app(range_end)->get_parameter(0).get_zstring()[0] };
+
+            zstring range_begin_string;
+            zstring range_end_string;
+            if (!m_util_s.str.is_string(range_begin, range_begin_string) || !m_util_s.str.is_string(range_end, range_end_string)) {
+                util::throw_error("We can extract symbols from range only if both range endpoints are string literals");
+            }
+            SASSERT(range_begin_string.length() == 1 && range_end_string.length() == 1);
+            const unsigned range_begin_value = range_begin_string[0];
+            const unsigned range_end_value = range_end_string[0];
+
             if (range_begin_value > range_end_value) {
                 return zstring(); // if range is invalid, it means empty string
             } else {
@@ -897,7 +957,7 @@ namespace smt::noodler::regex {
         return true;
     }
 
-    mata::nft::Nft ReplaceAllPrefixTree::create_transducer(mata::Alphabet* mata_alph) {
+    mata::nft::Nft ReplaceAllPrefixTree::create_transducer(const regex::Alphabet& alph) {
         // We will basically construct a product of prefix tree with identity transducer, but
         // for the matched finds in the prefix tree, we replace them with their corresponding replaces.
         // The state 0 is initial and final state that will have loops containing the replace operations
@@ -941,7 +1001,7 @@ namespace smt::noodler::regex {
             //  - continue reading
             //  - finish reading and print the replacing word to second tape
             //  - fail reading (it does not match any replace operation) and print already read word to second tape
-            for (mata::Symbol symbol : mata_alph->get_alphabet_symbols()) {
+            for (mata::Symbol symbol : alph) {
                 auto symbol_transition_it = prefix_automaton.delta[prefix_state].find(symbol);
                 if (auto next_prefix_state = get_next_state(prefix_state, symbol)) {
                     // symbol is in the prefix tree
@@ -987,7 +1047,7 @@ namespace smt::noodler::regex {
         return result;
     }
 
-    void gather_transducer_constraints(app* ex, ast_manager& m, const seq_util& m_util_s, obj_map<expr, expr*>& pred_replace, std::map<BasicTerm, expr_ref>& var_name, mata::Alphabet* mata_alph, Formula& transducer_preds) {
+    void gather_transducer_constraints(app* ex, ast_manager& m, const seq_util& m_util_s, obj_map<expr, expr*>& pred_replace, const regex::Alphabet& alph, Formula& transducer_preds) {
         if (m_util_s.str.is_string(ex)) { // Handle string literals.
             return;
         }
@@ -995,7 +1055,7 @@ namespace smt::noodler::regex {
         if (util::is_variable(ex)) {
             for (const auto& key_value : pred_replace) {
                 if (to_app(key_value.m_value) == ex) {
-                    gather_transducer_constraints(to_app(key_value.m_key), m, m_util_s, pred_replace, var_name, mata_alph, transducer_preds);
+                    gather_transducer_constraints(to_app(key_value.m_key), m, m_util_s, pred_replace, alph, transducer_preds);
                 }
             }
             return;
@@ -1004,12 +1064,12 @@ namespace smt::noodler::regex {
         expr * a1 = nullptr, *a2 = nullptr, *a3 = nullptr;
 
         if (m_util_s.str.is_concat(ex, a1, a2)) {
-            gather_transducer_constraints(to_app(a1), m, m_util_s, pred_replace, var_name, mata_alph, transducer_preds);
-            gather_transducer_constraints(to_app(a2), m, m_util_s, pred_replace, var_name, mata_alph, transducer_preds);
+            gather_transducer_constraints(to_app(a1), m, m_util_s, pred_replace, alph, transducer_preds);
+            gather_transducer_constraints(to_app(a2), m, m_util_s, pred_replace, alph, transducer_preds);
             return;
         }
 
-        if (!(m_util_s.str.is_replace_all(ex) || m_util_s.str.is_replace_re_all(ex))) {
+        if (!(m_util_s.str.is_replace_all(ex) || m_util_s.str.is_replace_re_all(ex) || m_util_s.str.is_replace_re(ex))) {
             return;
         }
 
@@ -1017,17 +1077,22 @@ namespace smt::noodler::regex {
 
         // check if we have not constructed this transducer already 
         expr* rpl = pred_replace.find(ex); // dies if it is not found
-        BasicTerm result_var(BasicTermType::Variable, to_app(rpl)->get_decl()->get_name().str());
+        BasicTerm result_var = util::get_variable_basic_term(rpl);
         for (const Predicate& trans_pred : transducer_preds.get_predicates()) {
             if (trans_pred.is_transducer() && trans_pred.get_output().size() == 1 && trans_pred.get_output()[0] == result_var) {
                 return;
             }
         }
 
-        // collect all nested replace_all and replace_re_all and keep their arguments as pairs
+        // collect all nested replace_all/replace_re/replace_re_all and keep their arguments as pairs
         // in find_and_replace (where find can be either zstring for replace_all or NFA for 
-        // replace_re_all)
-        std::vector<std::pair<std::variant<zstring,mata::nfa::Nfa>,zstring>> find_and_replace;
+        // replace_re/replace_re_all)
+        struct ReplaceInfo {
+            std::variant<zstring,mata::nfa::Nfa> find;
+            zstring replace;
+            mata::applications::strings::replace::ReplaceMode mode;
+        };
+        std::vector<ReplaceInfo> find_and_replace;
         while (true) {
             if (m_util_s.str.is_replace_all(ex, a1, a2, a3)) {
                 zstring find, replace;
@@ -1035,7 +1100,7 @@ namespace smt::noodler::regex {
                     util::throw_error("only replace_all with concrete find&replace is supported");
                 }
 
-                find_and_replace.emplace_back(find, replace);
+                find_and_replace.emplace_back(find, replace, mata::applications::strings::replace::ReplaceMode::All);
                 ex = to_app(a1);
             } else if (m_util_s.str.is_replace_re_all(ex, a1, a2, a3)) {
                 zstring replace;
@@ -1044,12 +1109,20 @@ namespace smt::noodler::regex {
                 }
 
                 // construct NFA corresponding to the regex find
-                auto ov = mata_alph->get_alphabet_symbols();
-                std::set<mata::Symbol> syms(ov.begin(), ov.end());
-                Alphabet alph(syms);
                 mata::nfa::Nfa find_nfa = conv_to_nfa(to_app(a2), m_util_s, m, alph);
 
-                find_and_replace.emplace_back(find_nfa, replace);
+                find_and_replace.emplace_back(find_nfa, replace, mata::applications::strings::replace::ReplaceMode::All);
+                ex = to_app(a1);
+            } else if (m_util_s.str.is_replace_re(ex, a1, a2, a3)) {
+                zstring replace;
+                if(!m_util_s.str.is_string(a3, replace)) {
+                    util::throw_error("only replace_re with concrete find&replace is supported");
+                }
+
+                // construct NFA corresponding to the regex find
+                mata::nfa::Nfa find_nfa = conv_to_nfa(to_app(a2), m_util_s, m, alph);
+
+                find_and_replace.emplace_back(find_nfa, replace, mata::applications::strings::replace::ReplaceMode::Single);
                 ex = to_app(a1);
             } else {
                 break;
@@ -1058,33 +1131,34 @@ namespace smt::noodler::regex {
 
         if (!find_and_replace.empty()) {
             // recursively call on nested parameters
-            gather_transducer_constraints(ex, m, m_util_s, pred_replace, var_name, mata_alph, transducer_preds);
+            gather_transducer_constraints(ex, m, m_util_s, pred_replace, alph, transducer_preds);
 
             // collect and replace replace_(re)_all argument with a concatenation of basic terms
             std::vector<BasicTerm> side {};
-            util::collect_terms(ex, m, m_util_s, pred_replace, var_name, side);
+            util::collect_terms(ex, m, m_util_s, pred_replace, side);
 
             // iterate backwards and construct transducer representing the replace operations
             auto backward_iterator = find_and_replace.rbegin();
             auto backward_iterator_end = find_and_replace.rend();
-            auto get_next_transducer = [&mata_alph,&backward_iterator,&backward_iterator_end]() {
+            auto get_next_transducer = [&alph, &backward_iterator, &backward_iterator_end]() {
                 auto backward_iterator_old = backward_iterator;
                 ReplaceAllPrefixTree prefix_tree;
                 while (backward_iterator != backward_iterator_end
-                    && std::holds_alternative<zstring>(backward_iterator->first)
-                    && prefix_tree.add_find(std::get<zstring>(backward_iterator->first), backward_iterator->second)) {
+                    && std::holds_alternative<zstring>(backward_iterator->find)
+                    && prefix_tree.add_find(std::get<zstring>(backward_iterator->find), backward_iterator->replace)) {
                         ++backward_iterator;
                 }
 
                 if (backward_iterator != backward_iterator_old) {
-                    return mata::nft::reduce(prefix_tree.create_transducer(mata_alph)).trim();
+                    return mata::nft::reduce(prefix_tree.create_transducer(alph)).trim();
                 } else {
-                    auto& find = backward_iterator->first;
-                    zstring& replace = backward_iterator->second;
+                    const auto& find = backward_iterator->find;
+                    const zstring& replace = backward_iterator->replace;
+                    const mata::applications::strings::replace::ReplaceMode mode = backward_iterator->mode;
                     SASSERT(backward_iterator != backward_iterator_end);
                     mata::nft::Nft result = std::holds_alternative<zstring>(find) ?
-                                                mata::applications::strings::replace::replace_reluctant_literal(util::get_mata_word_zstring(std::get<zstring>(find)), util::get_mata_word_zstring(replace), mata_alph)
-                                              : mata::applications::strings::replace::replace_reluctant_regex(std::get<mata::nfa::Nfa>(find), util::get_mata_word_zstring(replace), mata_alph);
+                                                mata::applications::strings::replace::replace_reluctant_literal(util::get_mata_word_zstring(std::get<zstring>(find)), util::get_mata_word_zstring(replace), &alph.get_mata_alphabet(), mode)
+                                              : mata::applications::strings::replace::replace_reluctant_regex(mata::nfa::determinize(std::get<mata::nfa::Nfa>(find)), util::get_mata_word_zstring(replace), &alph.get_mata_alphabet(), mode);
                     ++backward_iterator;
                     return mata::nft::reduce(mata::nft::remove_epsilon(result).trim()).trim();
                 }
@@ -1105,7 +1179,7 @@ namespace smt::noodler::regex {
                         tout << next_transducer.print_to_dot(true);
                     }
                 );
-                transducer = mata::nft::compose(transducer, next_transducer, 1, 0);
+                transducer = mata::nft::compose(transducer, next_transducer, 1, 0, true, mata::nft::JumpMode::NoJump);
                 transducer = mata::nft::reduce(mata::nft::remove_epsilon(transducer).trim()).trim();
                 STRACE(str_gather_transducer_constraints,
                     tout << "Size of composed NFT " << transducer.num_of_states() << "\n";

@@ -39,7 +39,7 @@ namespace smt::noodler {
         Transducer, 
     };
 
-    [[nodiscard]] static std::string to_string(PredicateType predicate_type) {
+    [[nodiscard, maybe_unused]] static inline std::string to_string(PredicateType predicate_type) {
         switch (predicate_type) {
             case PredicateType::Equation:
                 return "Equation";
@@ -55,15 +55,18 @@ namespace smt::noodler {
     }
 
     enum struct BasicTermType {
-        Variable,
-        Literal,
-        Length,
+        Variable, // string and int vars (for string vars we pretend it is its length in LenNode)
+        RealVariable, // real variables (important for LenNode)
+        Literal, // string literal
+        Length, // numeral literal
     };
 
-    [[nodiscard]] static std::string to_string(BasicTermType term_type) {
+    [[nodiscard, maybe_unused]] static inline std::string to_string(BasicTermType term_type) {
         switch (term_type) {
             case BasicTermType::Variable:
                 return "Variable";
+            case BasicTermType::RealVariable:
+                return "RealVariable";
             case BasicTermType::Literal:
                 return "Literal";
             case BasicTermType::Length:
@@ -79,7 +82,8 @@ namespace smt::noodler {
         BasicTerm(BasicTermType type, zstring name): type(type), name(std::move(name)) {}
 
         [[nodiscard]] BasicTermType get_type() const { return type; }
-        [[nodiscard]] bool is_variable() const { return type == BasicTermType::Variable; }
+        [[nodiscard]] bool is_variable() const { return (type == BasicTermType::Variable || type == BasicTermType::RealVariable); }
+        [[nodiscard]] bool is_real_variable() const { return type == BasicTermType::RealVariable; }
         [[nodiscard]] bool is_literal() const { return type == BasicTermType::Literal; }
         [[nodiscard]] bool is(BasicTermType term_type) const { return type == term_type; }
 
@@ -106,19 +110,19 @@ namespace smt::noodler {
         zstring name;
     }; // Class BasicTerm.
 
-    [[nodiscard]] static std::string to_string(const BasicTerm& basic_term) {
+    [[nodiscard, maybe_unused]] static inline std::string to_string(const BasicTerm& basic_term) {
         return basic_term.to_string();
     }
 
 
-    static std::ostream& operator<<(std::ostream& os, const BasicTerm& basic_term) {
+    [[maybe_unused]] static inline std::ostream& operator<<(std::ostream& os, const BasicTerm& basic_term) {
         os << basic_term.to_string();
         return os;
     }
 
-    static bool operator==(const BasicTerm& lhs, const BasicTerm& rhs) { return lhs.equals(rhs); }
-    static bool operator!=(const BasicTerm& lhs, const BasicTerm& rhs) { return !(lhs == rhs); }
-    static bool operator<(const BasicTerm& lhs, const BasicTerm& rhs) {
+    static inline bool operator==(const BasicTerm& lhs, const BasicTerm& rhs) { return lhs.equals(rhs); }
+    static inline bool operator!=(const BasicTerm& lhs, const BasicTerm& rhs) { return !(lhs == rhs); }
+    static inline bool operator<(const BasicTerm& lhs, const BasicTerm& rhs) {
         if (lhs.get_type() < rhs.get_type()) {
             return true;
         } else if (lhs.get_type() > rhs.get_type()) {
@@ -130,7 +134,7 @@ namespace smt::noodler {
         }
         return false;
     }
-    static bool operator>(const BasicTerm& lhs, const BasicTerm& rhs) { return !(lhs < rhs); }
+    static inline bool operator>(const BasicTerm& lhs, const BasicTerm& rhs) { return !(lhs < rhs); }
 
     [[nodiscard]] static std::string to_string(const std::vector<BasicTerm>& vec, const std::string& delimiter = " ") {
         if(vec.empty()) return "";
@@ -141,7 +145,7 @@ namespace smt::noodler {
         return ret;
     }
 
-    static std::ostream& operator<<(std::ostream& os, const std::vector<BasicTerm>& vec) {
+    [[maybe_unused]] static inline std::ostream& operator<<(std::ostream& os, const std::vector<BasicTerm>& vec) {
         os << to_string(vec);
         return os;
     }
@@ -194,11 +198,12 @@ namespace smt::noodler {
 
         LenNode(rational k) : type(LenFormulaType::LEAF), atom_val(BasicTermType::Length, zstring(k)), succ() { };
         LenNode(int k) : LenNode(rational(k)) { };
+        LenNode(unsigned k) : LenNode(rational(k)) { };
         LenNode(BasicTerm val) : type(LenFormulaType::LEAF), atom_val(val), succ() { };
         LenNode(LenFormulaType tp, std::vector<struct LenNode> s = {}) : type(tp), atom_val(BasicTerm(BasicTermType::Length)), succ(s) { };
     };
 
-    static std::ostream& operator<<(std::ostream& os, const LenNode& node) {
+    static inline std::ostream& operator<<(std::ostream& os, const LenNode& node) {
         auto children_iterator = node.succ.begin(); // Some nodes, e.g., quantifiers would like to consume successor nodes
         bool was_opening_parenthesis_emitted = true;
 
@@ -210,12 +215,9 @@ namespace smt::noodler {
             return (os << "false");
         case LenFormulaType::LEAF: {
             zstring name = node.atom_val.get_name();
-            // Make sure that we print negative numbers in a valid SMT2 format
             if (node.atom_val.is(BasicTermType::Length)) {
-                if (name[0] == '-') {
-                    os << "(- " << name.encode().substr(1) << ")";
-                    return os;
-                }
+                rational(name.encode().c_str()).display_smt2(os);
+                return os;
             }
             return (os << node.atom_val.get_name());
         }
@@ -330,7 +332,7 @@ namespace smt::noodler {
             params(par),
             transducer(trans) {
             assert(type == PredicateType::Transducer);
-            assert(trans->num_of_levels == 2);
+            assert(trans->levels.num_of_levels == 2);
         }
 
 
@@ -585,8 +587,11 @@ namespace smt::noodler {
         }
 
         /**
-         * @brief Get the length formula of the equation. For an equation X1 X2 X3 ... = Y1 Y2 Y3 ...
-         * creates a formula |X1|+|X2|+|X3|+ ... = |Y1|+|Y2|+|Y3|+ ...
+         * @brief Get the length formula of the (dis)equation.
+         * For an equation X1 X2 ... Xn = Y1 Y2 ... Ym creates the formula
+         * |X1|+|X2|+...+|Xn| = |Y1|+|Y2|+...+|Ym|
+         * Similarly, for a disequation X1 X2 ... Xn != Y1 Y2 ... Ym creates the formula
+         * |X1|+|X2|+...+|Xn| != |Y1|+|Y2|+...+|Ym|
          *
          * @return LenNode Root of the length formula
          */
@@ -787,11 +792,11 @@ namespace smt::noodler {
         }
     }; // Class Predicate.
 
-    [[nodiscard]] static std::string to_string(const Predicate& predicate) {
+    [[nodiscard, maybe_unused]] static inline std::string to_string(const Predicate& predicate) {
         return predicate.to_string();
     }
 
-    static std::ostream& operator<<(std::ostream& os, const Predicate& predicate) {
+    [[maybe_unused]] static inline std::ostream& operator<<(std::ostream& os, const Predicate& predicate) {
         os << predicate.to_string();
         return os;
     }
@@ -939,12 +944,12 @@ namespace smt::noodler {
         }
     }; // Class Formula.
 
-    static bool operator==(const Formula& lhs, const Formula& rhs) { return lhs.get_predicates() == rhs.get_predicates(); }
-    static bool operator!=(const Formula& lhs, const Formula& rhs) { return !(lhs == rhs); }
-    static bool operator<(const Formula& lhs, const Formula& rhs) {
+    [[nodiscard]] static inline bool operator==(const Formula& lhs, const Formula& rhs) { return lhs.get_predicates() == rhs.get_predicates(); }
+    [[nodiscard, maybe_unused]] static inline bool operator!=(const Formula& lhs, const Formula& rhs) { return !(lhs == rhs); }
+    [[nodiscard]] static inline bool operator<(const Formula& lhs, const Formula& rhs) {
        return lhs.get_predicates() < rhs.get_predicates();
     }
-    static bool operator>(const Formula& lhs, const Formula& rhs) { return !(lhs < rhs); }
+    [[nodiscard, maybe_unused]] static inline bool operator>(const Formula& lhs, const Formula& rhs) { return !(lhs < rhs); }
 
     // Conversions of strings to ints/code values and vice versa
     enum class ConversionType {
@@ -952,15 +957,24 @@ namespace smt::noodler {
         FROM_CODE,
         TO_INT,
         FROM_INT,
+        TO_REAL,
+        FROM_REAL
     };
 
-    // Term conversion: to_int/from_int/to_code/from_code
+    // Term conversion: to_int/from_int/to_code/from_code/to_real/from_real
     struct TermConversion {
         ConversionType type;
         BasicTerm string_var;
-        BasicTerm int_var;
+        BasicTerm number_var;
 
-        TermConversion(ConversionType type, BasicTerm string_var, BasicTerm int_var) : type(type), string_var(std::move(string_var)), int_var(std::move(int_var)) {}
+        rational width = rational(0); // maximum number of decimal places for FROM_REAL operation
+
+        TermConversion(ConversionType type, BasicTerm string_var, BasicTerm number_var) : type(type), string_var(std::move(string_var)), number_var(std::move(number_var)) {}
+        TermConversion(ConversionType type, BasicTerm string_var, BasicTerm number_var, rational width) : type(type), string_var(std::move(string_var)), number_var(std::move(number_var)), width(width) { SASSERT(type == ConversionType::FROM_REAL); }
+
+        bool is_code_conversion() const { return (type == ConversionType::TO_CODE || type == ConversionType::FROM_CODE); }
+        bool is_int_conversion() const { return (type == ConversionType::TO_INT || type == ConversionType::FROM_INT); }
+        bool is_real_conversion() const { return (type == ConversionType::TO_REAL || type == ConversionType::FROM_REAL); }
     };
 
     inline std::string get_conversion_name(ConversionType type) {
@@ -974,6 +988,10 @@ namespace smt::noodler {
             return "to_int";
         case ConversionType::FROM_INT:
             return "from_int";
+        case ConversionType::TO_REAL:
+            return "to_real";
+        case ConversionType::FROM_REAL:
+            return "from_real";
 
         default:
             UNREACHABLE();

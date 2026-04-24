@@ -14,10 +14,11 @@
 #include <mata/nfa/builder.hh>
 
 #include "formula.h"
+#include "regex.h"
 
 namespace smt::noodler {
 
-    using interval_word = std::vector<std::pair<mata::Symbol,mata::Symbol>>;
+    using IntervalWord = std::vector<std::pair<mata::Symbol,mata::Symbol>>;
 
     /**
      * hints for using AutAssignment:
@@ -28,7 +29,7 @@ namespace smt::noodler {
 
     private:
         /// Union of all alphabets of automata in the aut assignment
-        std::set<mata::Symbol> alphabet;
+        regex::Alphabet alphabet;
 
         void update_alphabet() {
             this->alphabet.clear();
@@ -40,6 +41,8 @@ namespace smt::noodler {
 
     public:
         using std::unordered_map<BasicTerm, std::shared_ptr<mata::nfa::Nfa>>::unordered_map;
+
+        AutAssignment(regex::Alphabet alph) : alphabet(std::move(alph)) { }
 
         // used for tests, do not use normally
         AutAssignment(std::map<BasicTerm, mata::nfa::Nfa> val) {
@@ -93,10 +96,12 @@ namespace smt::noodler {
             return nfa;
         }
 
-        // represents code point of digit 0
-        static const mata::Symbol DIGIT_SYMBOL_START = 48;
-        // represents code point of digit 9
-        static const mata::Symbol DIGIT_SYMBOL_END = 57;
+        // represents the code point of digit 0
+        static constexpr mata::Symbol DIGIT_SYMBOL_START = 48;
+        // represents the code point of digit 9
+        static constexpr mata::Symbol DIGIT_SYMBOL_END = 57;
+        // represents the code point of .
+        static constexpr mata::Symbol REAL_NUMBER_DELIMITER = 46;
 
         /**
          * @brief Returns automaton that accept non-empty words containing only symbols encoding digits (symbols from 48 to 57)
@@ -134,6 +139,34 @@ namespace smt::noodler {
             return only_digits_of_length;
         }
 
+        /// Returns automaton that accept words from [0-9]*.[0-9]* where . is the decimal separator
+        static mata::nfa::Nfa decimal_automaton() {
+            mata::nfa::Nfa res(2, {0}, {1});
+            for (mata::Symbol digit = AutAssignment::DIGIT_SYMBOL_START; digit <= AutAssignment::DIGIT_SYMBOL_END; ++digit) {
+                res.delta.add(0, digit, 0);
+                res.delta.add(1, digit, 1);
+            }
+            res.delta.add(0, AutAssignment::REAL_NUMBER_DELIMITER, 1);
+            return res;
+        }
+
+        /// Returns automaton that accept words from [0-9]{length_of_whole_part}.[0-9]{length_of_decimal_part} where . is the decimal separator
+        static mata::nfa::Nfa decimal_automaton_of_lengths(unsigned length_of_whole_part, unsigned length_of_decimal_part) {
+            mata::nfa::Nfa res(length_of_whole_part+length_of_decimal_part+2, {0}, {length_of_whole_part+length_of_decimal_part+1});
+            for (unsigned i = 0; i < length_of_whole_part; ++i) {
+                for (mata::Symbol digit = AutAssignment::DIGIT_SYMBOL_START; digit <= AutAssignment::DIGIT_SYMBOL_END; ++digit) {
+                    res.delta.add(i, digit, i+1);
+                }
+            }
+            res.delta.add(length_of_whole_part, AutAssignment::REAL_NUMBER_DELIMITER, length_of_whole_part+1);
+            for (unsigned i = length_of_whole_part+1; i < length_of_whole_part+length_of_decimal_part+1; ++i) {
+                for (mata::Symbol digit = AutAssignment::DIGIT_SYMBOL_START; digit <= AutAssignment::DIGIT_SYMBOL_END; ++digit) {
+                    res.delta.add(i, digit, i+1);
+                }
+            }
+            return res;
+        }
+
         /**
          * @brief Get the vector of "interval" words accepted by @p aut
          * 
@@ -146,11 +179,11 @@ namespace smt::noodler {
          *      {4, 12, 2}
          *          ...
          * 
-         * Assumes that @p aut is minimized and accepts a non-empty finite language
+         * Assumes that @p aut is minimized and accepts a non-empty finite language where each word has the same length
          * 
-         * @param aut - minimized automaton that accepts finite language
+         * @param aut - minimized automaton that accepts finite language where each word has the same length
          */
-        static std::vector<interval_word> get_interval_words(const mata::nfa::Nfa& aut);
+        static std::vector<IntervalWord> get_interval_words(const mata::nfa::Nfa& aut);
 
         /**
          * @brief Checks if @p aut encodes literal, i.e., it accepts only one word that does not contain dummy symbol.
@@ -158,7 +191,7 @@ namespace smt::noodler {
          * Works only if @p aut was trimmed and reduced by simulation (or determinized and minimized).
          * The found literal is saved in @p found_literal.
          */
-       static bool aut_encodes_literal(const mata::nfa::Nfa& aut, zstring& found_literal);
+        static bool aut_encodes_literal(const mata::nfa::Nfa& aut, zstring& found_literal);
 
         mata::nfa::Nfa get_automaton_concat(const std::vector<BasicTerm>& concat) const {
             mata::nfa::Nfa ret = mata::nfa::builder::create_empty_string_nfa();
@@ -179,7 +212,7 @@ namespace smt::noodler {
          * @brief Checks if the automaton for @p t contains empty word in its language.
          */
         bool contains_epsilon(const BasicTerm &t) const {
-            return this->at(t)->is_in_lang({});
+            return this->at(t)->is_in_lang(mata::Word{});
         }
 
         // adds all mappings of variables from other to this assignment except those which already exists in this assignment
@@ -194,25 +227,17 @@ namespace smt::noodler {
             }
         }
 
-        const std::set<mata::Symbol>& get_alphabet() const {
+        const regex::Alphabet& get_alphabet() const {
             return this->alphabet;
         }
 
-        void set_alphabet(const std::set<uint32_t>& alphabet) {
-            this->alphabet.clear();
-            for (const auto& symbol : alphabet) {
-                this->alphabet.insert(symbol);
-            }
+        void set_alphabet(regex::Alphabet alph) {
+            this->alphabet = std::move(alph);
         }
 
         void add_symbol_to_alphabet(mata::Symbol s) {
             this->alphabet.insert(s);
         }
-
-        mata::Symbol add_fresh_symbol_to_alphabet();
-
-        /// @brief Add symbol @p s to alphabet and removes it from dummy symbol (i.e. adds transitions trough @p s in all automata if there is transition trough dummy symbol)
-        void add_symbol_from_dummy(mata::Symbol s);
 
         bool replace_dummy_with_symbols(std::set<mata::Symbol> symbols);
 
@@ -230,12 +255,7 @@ namespace smt::noodler {
          * @return true Is complement of a finite language
          */
         bool is_co_finite(const BasicTerm& t) const {
-            mata::OnTheFlyAlphabet mata_alphabet{};
-            for (const auto& symbol : this->alphabet) {
-                mata_alphabet.add_new_symbol(std::to_string(symbol), symbol);
-            }
-
-            mata::nfa::Nfa cmp = mata::nfa::minimize(mata::nfa::complement(*(*this).at(t), mata_alphabet));
+            mata::nfa::Nfa cmp = mata::nfa::minimize(mata::nfa::complement(*(*this).at(t), alphabet.get_mata_alphabet()));
             return cmp.trim().is_acyclic();
         }
 
@@ -335,7 +355,7 @@ namespace smt::noodler {
             return ret;
         }
 
-        std::string print() {
+        std::string print() const {
             std::stringstream res;
             for (const auto &key_val : *this) {
                 res << "Automaton for " << key_val.first.get_name() << ":" << std::endl << *key_val.second;
@@ -376,12 +396,8 @@ namespace smt::noodler {
          * @param aut Automaton to be complemented
          * @return mata::nfa::Nfa 
          */
-        mata::nfa::Nfa complement_aut(mata::nfa::Nfa& aut) {
-            mata::OnTheFlyAlphabet mata_alphabet{};
-            for (const auto& symbol : get_alphabet()) {
-                mata_alphabet.add_new_symbol(std::to_string(symbol), symbol);
-            }
-            return mata::nfa::complement(aut, mata_alphabet);
+        mata::nfa::Nfa complement_aut(const mata::nfa::Nfa& aut) const {
+            return mata::nfa::complement(aut, alphabet.get_mata_alphabet());
         }
 
         /**

@@ -17,14 +17,13 @@
 #include "params/smt_params.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/seq_decl_plugin.h"
-#include "params/theory_str_params.h"
 #include "util/scoped_vector.h"
 #include "util/union_find.h"
 #include "ast/rewriter/seq_rewriter.h"
 #include "ast/rewriter/th_rewriter.h"
+#include "ast/for_each_expr.h"
 
 #include "formula.h"
-#include "aut_assignment.h"
 
 // FIXME most if not all these functions should probably be in theory_str_noodler
 
@@ -60,16 +59,6 @@ namespace smt::noodler::util {
     void check_limit(ast_manager& m);
 
     /**
-    Get variables from a given expression @p ex. Append to the output parameter @p res.
-    @param ex Expression to be checked for variables.
-    @param m_util_s Seq util for AST
-    @param m AST manager
-    @param[out] res Vector of found variables (may contain duplicities).
-    @param pred_map predicate to variable mapping
-    */
-    void get_str_variables(expr* ex, const seq_util& m_util_s, const ast_manager& m, obj_hashtable<expr>& res, obj_map<expr, expr*>* pred_map=nullptr);
-
-    /**
      * Check whether an @p expression is a string variable.
      *
      * Function checks only the top-level expression and is not recursive.
@@ -89,15 +78,6 @@ namespace smt::noodler::util {
     bool is_variable(const expr* expression);
 
     /**
-     * Get variable names from a given expression @p ex. Append to the output parameter @p res.
-     * @param[in] ex Expression to be checked for variables.
-     * @param[in] m_util_s Seq util for AST.
-     * @param[in] m AST manager.
-     * @param[out] res Vector of found variables (may contain duplicities).
-     */
-    void get_variable_names(expr* ex, const seq_util& m_util_s, const ast_manager& m, std::unordered_set<std::string>& res);
-
-    /**
      * Collect basic terms (vars, literals) from a concatenation @p ex. Append the basic terms to the output parameter
      *  @p terms.
      * @param ex Expression to be checked for basic terms.
@@ -107,9 +87,7 @@ namespace smt::noodler::util {
      *
      * TODO: Test.
      */
-    void collect_terms(app* ex, ast_manager& m, const seq_util& m_util_s, obj_map<expr, expr*>& pred_replace,
-                       std::map<BasicTerm, expr_ref>& var_name, std::vector<BasicTerm>& terms
-    );
+    void collect_terms(app* ex, ast_manager& m, const seq_util& m_util_s, obj_map<expr, expr*>& pred_replace, std::vector<BasicTerm>& terms);
 
     /**
      * Convert variable in @c expr form to @c BasicTerm.
@@ -120,6 +98,12 @@ namespace smt::noodler::util {
 
     void get_len_exprs(expr* ex, const seq_util& m_util_s, ast_manager& m, obj_hashtable<app>& res);
 
+    /// @brief Create a noodler (BasicTerm) variable with a given @p name representing an internal variable (should not clash with user-defined variables)
+    inline BasicTerm mk_internal_noodler_var(const zstring& name) {
+        // according to SMT-LIB standard, variable names starting with '@' are reserved for internal use
+        return BasicTerm{BasicTermType::Variable, zstring("@") + name};
+    }
+
     /**
      * @brief Create a fresh noodler (BasicTerm) variable with a given @p name followed by a unique suffix.
      *
@@ -127,25 +111,12 @@ namespace smt::noodler::util {
      *
      * @param name Infix of the name (rest is added to get a unique name)
      */
-    inline BasicTerm mk_noodler_var_fresh(const std::string& name) {
+    inline BasicTerm mk_noodler_var_fresh(const zstring& name) {
         // TODO kinda ugly, function is defined in header and have static variable
         // so it needs to be inline, maybe we should define some variable handler class
-        static std::map<std::string,unsigned> next_id_of_name;
-        return BasicTerm{BasicTermType::Variable, name + std::string("!n") + std::to_string((next_id_of_name[name])++)};
+        static std::map<zstring,unsigned> next_id_of_name;
+        return mk_internal_noodler_var(name + std::string("!n") + std::to_string((next_id_of_name[name])++));
     }
-
-    /**
-     * @brief Check whether the expression @p val is of the form ( @p num_res ) + (len @p s ).
-     *
-     * @param val Expression to be checked
-     * @param s String term with length
-     * @param m ast manager
-     * @param m_util_s string ast util
-     * @param m_util_a arith ast util
-     * @param[out] num_res expression to be substracked from length term
-     * @return Is of the form.
-     */
-    bool is_len_sub(expr* val, expr* s, ast_manager& m, seq_util& m_util_s, arith_util& m_util_a, expr*& num_res);
 
     /**
      * @brief Assuming that concatenation of automata in @p automata accepts @p word, returns in @p words splitted @p word, where @p word[i] is accepted by @p automata[i]
@@ -193,6 +164,52 @@ namespace smt::noodler::util {
     void replace_dummy_symbol_in_transducer_with(mata::nft::Nft& transducer, const std::set<mata::Symbol>& symbols_to_replace_with);
 
     bool is_concatenation_of_literals(const std::vector<BasicTerm>& concatenation, zstring& literal);
+
+    /**
+     * @brief Get a word from each tape of @p nft of lengths from @p lengths starting from some initial state in @p potentional_initial_states and passing transitions based on @p num_of_transitions_passes
+     * 
+     * More specifically, if (w1, w2, ..., wn) is an accepting word of @p nft, then it is returned by this function if
+     *      - it starts in some state from @p potentional_initial_states
+     *      - |wi| == lengths[i] (n is the number of tapes and it must hold that lengths.size() == n)
+     *      - the accepting run must fulfill @p num_of_transitions_passes (see below)
+     * Transitions of @p nft can be mapped to some number in @p num_of_transitions_passes representing the number of times
+     * the transition needs to be taken on the accepting run. If a transition is not mapped, then it is assumed that the
+     * transition cannot be taken. Futhermore, two (or more) transitions t1 and t2 can share one number l. This means that
+     * in the accepting run, t1 and t2 must be taken l number of times combined.
+     * 
+     * If no such run exists, we return std::nullopt
+     * 
+     * @param nft Transducer whose accepting word we are looking for
+     * @param lengths Lengths of accepting words (lengths.size() must be equal to number of tapes of @p nft )
+     * @param potentional_initial_states One of these states must be the starting point of the accepting run (does not need to be a subset of nft.initial)
+     * @param num_of_transitions_passes Maps transitions of @p nft to number of the given transition must be taken in the accepting run combined
+     * @return std::optional<std::vector<mata::Word>> The accepting words or std::nullopt if none exist.
+     */
+    std::optional<std::vector<mata::Word>> get_word_from_nft(const mata::nft::Nft nft, const std::vector<unsigned>& lengths, const std::set<mata::nft::State>& potentional_initial_states, const std::map<mata::nft::Transition,std::shared_ptr<unsigned>>& num_of_transitions_passes);
+
+    /**
+     * @brief Check whether an expression contains bound (quantified) variables.
+     *
+     * Inspects the AST rooted at @p e and returns true if it finds any variables
+     * that are bound by quantifiers (i.e., variables introduced by `forall`/`exists`).
+     *
+     * @param m AST manager used for traversal.
+     * @param e Expression to inspect.
+     * @return true if the expression contains quantified (bound) variables, false otherwise.
+     */
+    bool has_quanfied_vars(ast_manager& m, expr* e);
+
+    /**
+     * @brief Check whether an expression contains quantifier nodes.
+     *
+     * Traverses the AST rooted at @p e and returns true if any quantifier nodes
+     * (`forall` or `exists`) are present anywhere in the expression.
+     *
+     * @param m AST manager used for traversal.
+     * @param e Expression to inspect.
+     * @return true if the expression contains any quantifiers, false otherwise.
+     */
+    bool has_quantifiers(ast_manager& m, expr* e);
 }
 
 #endif

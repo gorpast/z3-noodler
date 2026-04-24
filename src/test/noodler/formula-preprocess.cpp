@@ -277,7 +277,7 @@ TEST_CASE( "Propagate variables", "[noodler]" ) {
     mata::nft::Nft nft{2};
     nft.initial = {0};
     nft.final = {1};
-    nft.insert_word_by_parts(0, { {'a'}, {'b'} } , 1);
+    nft.insert_word_by_levels(0, { {'a'}, {'b'} } , 1);
     auto nft_ptr = std::make_shared<mata::nft::Nft>(nft);
 
     Predicate eq1(PredicateType::Equation, std::vector<std::vector<BasicTerm>>({ std::vector<BasicTerm>({a, x3, x4}), std::vector<BasicTerm>({b, x1, x2}) })  );
@@ -298,6 +298,7 @@ TEST_CASE( "Propagate variables", "[noodler]" ) {
         prep.propagate_variables();
         prep.clean_varmap();
         INFO(prep.to_string());
+        INFO(prep.print_info());
 
         Formula res_conj;
         res_conj.add_predicate(Predicate(PredicateType::Equation, std::vector<std::vector<BasicTerm>>({ std::vector<BasicTerm>({a, x1, x4}), std::vector<BasicTerm>({b, x1, x1}) })));
@@ -305,9 +306,12 @@ TEST_CASE( "Propagate variables", "[noodler]" ) {
         FormulaPreprocessor prep_res(res_conj, aut_ass, {}, {}, {});
 
         AutAssignment ret = prep.get_aut_assignment();
+        SubstitutionMap sm = prep.get_substitution_map();
         CHECK(mata::nfa::are_equivalent(*ret.at(x1), regex_to_nfa("")));
-        CHECK(mata::nfa::are_equivalent(*ret.at(x2), regex_to_nfa("(a|b)*")));
-        CHECK(mata::nfa::are_equivalent(*ret.at(x3), regex_to_nfa("(b|c)*")));
+        CHECK(sm.at(x2).size() == 1);
+        CHECK(sm.at(x2).at(0) == x1);
+        CHECK(sm.at(x3).size() == 1);
+        CHECK(sm.at(x3).at(0) == x1);
         CHECK(prep.get_formula().get_varmap() == prep_res.get_formula().get_varmap());
         CHECK(prep.get_formula().get_predicates_set() == prep_res.get_formula().get_predicates_set());
         CHECK(prep.get_dependency() == Dependency({{0, {2,3}}, {1, {2,3}}, {3, {2}}}));
@@ -357,7 +361,7 @@ TEST_CASE( "Remove duplicates", "[noodler]" ) {
     mata::nft::Nft nft{2};
     nft.initial = {0};
     nft.final = {1};
-    nft.insert_word_by_parts(0, { {'a'}, {'b'} } , 1);
+    nft.insert_word_by_levels(0, { {'a'}, {'b'} } , 1);
     auto nft_ptr = std::make_shared<mata::nft::Nft>(nft);
 
     Predicate eq1(PredicateType::Equation, std::vector<std::vector<BasicTerm>>({ std::vector<BasicTerm>({a, x3, x4}), std::vector<BasicTerm>({b, x1, x2}) })  );
@@ -469,8 +473,8 @@ TEST_CASE( "Reduce regular", "[noodler]" ) {
     BasicTerm x6{ BasicTermType::Variable, "x_6"};
     BasicTerm a{ BasicTermType::Literal, "a"};
     BasicTerm b{ BasicTermType::Literal, "b"};
-    BasicTerm tmp0{BasicTermType::Variable, "regular_seq!n0"};
-    BasicTerm tmp1{BasicTermType::Variable, "regular_seq!n1"};
+    BasicTerm tmp0 = util::mk_internal_noodler_var("regular_seq!n0");
+    BasicTerm tmp1 = util::mk_internal_noodler_var("regular_seq!n1");
     AutAssignment aut_ass = AutAssignment({
         {y1, regex_to_nfa("(a|b)*")},
         {x1, regex_to_nfa("(a|b)*")},
@@ -484,7 +488,7 @@ TEST_CASE( "Reduce regular", "[noodler]" ) {
     });
 
     mata::nft::Nft nft{2, {0}, {1}};
-    nft.insert_word_by_parts(0, { {'a'}, {'b'} } , 1);
+    nft.insert_word_by_levels(0, { {'a'}, {'b'} } , 1);
     auto nft_ptr = std::make_shared<mata::nft::Nft>(nft);
 
     Predicate eq1(PredicateType::Inequation, std::vector<std::vector<BasicTerm>>({ std::vector<BasicTerm>({a, x3, x4, b}), std::vector<BasicTerm>({x1, x1, x2}) })  );
@@ -518,8 +522,8 @@ TEST_CASE( "Reduce regular", "[noodler]" ) {
         prep.reduce_regular_sequence(1);
         AutAssignment ret = prep.get_aut_assignment();
 
-        tmp0 = BasicTerm{BasicTermType::Variable, "regular_seq!n1"};
-        tmp1 = BasicTerm{BasicTermType::Variable, "regular_seq!n2"};
+        tmp0 = util::mk_internal_noodler_var("regular_seq!n1");
+        tmp1 = util::mk_internal_noodler_var("regular_seq!n2");
         CHECK(mata::nfa::are_equivalent(*ret.at(tmp0), regex_to_nfa("b*ab")));
         CHECK(mata::nfa::are_equivalent(*ret.at(tmp1), regex_to_nfa("(a|b)*a*")));
         CHECK(prep.get_formula().get_predicates_set() == std::set<Predicate>({
@@ -538,8 +542,8 @@ TEST_CASE( "Reduce regular", "[noodler]" ) {
         prep.reduce_regular_sequence(1);
         AutAssignment ret = prep.get_aut_assignment();
 
-        tmp0 = BasicTerm{BasicTermType::Variable, "regular_seq!n3"};
-        tmp1 = BasicTerm{BasicTermType::Variable, "regular_seq!n4"};
+        tmp0 = util::mk_internal_noodler_var("regular_seq!n3");
+        tmp1 = util::mk_internal_noodler_var("regular_seq!n4");
         CHECK(mata::nfa::are_equivalent(*ret.at(tmp0), regex_to_nfa("b*ab")));
         CHECK(mata::nfa::are_equivalent(*ret.at(tmp1), regex_to_nfa("(a|b)*a*")));
         CHECK(prep.get_formula().get_predicates_set() == std::set<Predicate>({
@@ -558,8 +562,8 @@ TEST_CASE( "Reduce regular", "[noodler]" ) {
         prep.reduce_regular_sequence(1);
         AutAssignment ret = prep.get_aut_assignment();
 
-        tmp0 = BasicTerm{BasicTermType::Variable, "regular_seq!n5"};
-        tmp1 = BasicTerm{BasicTermType::Variable, "regular_seq!n6"};
+        tmp0 = util::mk_internal_noodler_var("regular_seq!n5");
+        tmp1 = util::mk_internal_noodler_var("regular_seq!n6");
         CHECK(mata::nfa::are_equivalent(*ret.at(tmp0), regex_to_nfa("b*ab")));
         CHECK(mata::nfa::are_equivalent(*ret.at(tmp1), regex_to_nfa("(a|b)*a*")));
         CHECK(prep.get_formula().get_predicates_set() == std::set<Predicate>({
@@ -593,7 +597,7 @@ TEST_CASE( "Propagate eps", "[noodler]" ) {
     });
 
     mata::nft::Nft nft{2, {0}, {1}};
-    nft.insert_word_by_parts(0, { {'a'}, {'b'} } , 1);
+    nft.insert_word_by_levels(0, { {'a'}, {'b'} } , 1);
     auto nft_ptr = std::make_shared<mata::nft::Nft>(nft);
 
     Predicate eq1(PredicateType::Equation, std::vector<std::vector<BasicTerm>>({ std::vector<BasicTerm>({eps}), std::vector<BasicTerm>({x1, x2}) })  );

@@ -11,7 +11,7 @@
 namespace smt::noodler {
 
     BasicTerm begin_of(zstring of, zstring from) {
-        return BasicTerm(BasicTermType::Variable, "B!" + of.encode() + "_IN_" + from.encode());
+        return util::mk_internal_noodler_var(zstring("B") + of + zstring("_IN_") + from);
     }
 
     bool VarConstraint::check_side(const Concat& side) {
@@ -516,8 +516,12 @@ namespace smt::noodler {
         
         STRACE(str, tout << " - checking suitability: "; );
         for (const Predicate& pred : this->formula.get_predicates()) {
+            // disequations we underapproximate
+            if(pred.is_inequation()) {
+                continue;
+            }
             if (!pred.is_equation()) {
-                STRACE(str, tout << "False - Inequations\n");
+                STRACE(str, tout << "False - Unsupported predicate\n");
                 return l_undef;
             }
             if (pred.mult_occurr_var_side(Predicate::EquationSideType::Left) || 
@@ -561,6 +565,9 @@ namespace smt::noodler {
         }
 
         for (const Predicate& pred : this->formula.get_predicates()) {
+            if(pred.is_inequation()) {
+                continue;
+            }
             this->pool.add_to_pool(pred);
         }   
 
@@ -592,6 +599,15 @@ namespace smt::noodler {
         // generate length for each batch of equations in the pool
         for (const auto& [var, constr] : pool) {
             computed_len_formula.emplace_back(constr.get_lengths(this->pool));
+        }
+        // for disequations, generate |lhs| != |rhs|
+        for (const Predicate& pred : this->formula.get_predicates()) {
+            if(!pred.is_inequation()) {
+                continue;
+            }
+            this->precision = LenNodePrecision::UNDERAPPROX;
+            STRACE(str, tout << "Disequation: " << pred.to_string() << std::endl;);
+            computed_len_formula.push_back(pred.get_formula_eq());
         }
 
         // there are multiple variable occurrences --> generate LIA formula matching their values
@@ -632,10 +648,7 @@ namespace smt::noodler {
             BasicTerm term = t.first;
             std::set<smt::noodler::BasicTerm> vars_in_eqs = this->formula.get_vars();    // Variables in all predicates
 
-            // term does not appear in any predicate
-            if (vars_in_eqs.find(term) == vars_in_eqs.end()) {
-                len_formula.succ.emplace_back(this->init_aut_ass.get_lengths(term));
-            }
+            len_formula.succ.emplace_back(this->init_aut_ass.get_lengths(term));
         }
 
         return {len_formula, this->precision};
@@ -663,6 +676,9 @@ namespace smt::noodler {
             }
         }
 
+        // Substitute singleton variables with their unique word as a literal so that
+        // the constraint pool's align_literals mechanism can detect content incompatibilities.
+        prep_handler.propagate_singletons();
         prep_handler.propagate_eps();
         prep_handler.propagate_variables();
         prep_handler.generate_identities();
@@ -760,7 +776,7 @@ namespace smt::noodler {
 
 
     LengthProcModel::LengthProcModel(const ConstraintPool& block_pool, const SubstitutionMap& subst, const AutAssignment& aut_ass, const std::set<BasicTerm>& multi_var_set) : model(), subst_map(subst), aut_ass(aut_ass), block_pool(block_pool), multi_var_set(multi_var_set) {
-        if(aut_ass.get_alphabet().size() != 0) {
+        if(aut_ass.get_alphabet().size() != 0 && aut_ass.get_alphabet().contains(util::get_dummy_symbol())) {
             this->aut_ass.replace_dummy_with_new_symbol();
         }
         std::set<BasicTerm> len_vars{};
