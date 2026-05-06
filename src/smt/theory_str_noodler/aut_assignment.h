@@ -10,6 +10,7 @@
 #include <memory>
 
 #include <mata/nfa/nfa.hh>
+#include <mata/nfa/colors.hh>
 #include <mata/applications/strings.hh>
 #include <mata/nfa/builder.hh>
 
@@ -419,6 +420,42 @@ namespace smt::noodler {
          * @return true <-> the corresponding automaton is flat
          */
         bool is_flat(const BasicTerm& t) const;
+
+    };
+
+    class ColorAutAssignment : public std::unordered_map<BasicTerm, std::shared_ptr<mata::nfa::ColorsNfa>> {
+        public: 
+            ColorAutAssignment() = default;
+            ColorAutAssignment(AutAssignment aut_ass) {
+
+                for (auto pair: aut_ass) {
+                    (*this)[pair.first] = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::ColorsNfa(*(pair.second), mata::nfa::ColorFormula()));
+                    STRACE(str, tout << (*(*this)[pair.first]).num_of_states() << "im here\n");
+                }
+            }
+
+            mata::nfa::ColorsNfa get_automaton_concat(const std::vector<BasicTerm>& concat, AutAssignment reference_aut) const {
+                mata::nfa::ColorsNfa ret = mata::nfa::ColorsNfa(mata::nfa::builder::create_empty_string_nfa() , mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::True));
+                for(const BasicTerm& t : concat) {
+                    if (this->find(t) == this->end()) {
+                        mata::nfa::ColorsNfa non_color = mata::nfa::ColorsNfa(*reference_aut.at(t), mata::nfa::ColorFormula());
+                        ret.concatenate(non_color);  // fails when not found
+                    } else {
+                        // TODO I want it to run at least somehow so I will set vars not in colors_aut_ass to non color version of aut assignment
+                        STRACE(str, tout << "im at: " << t << "\n");
+                        ret.concatenate(*(this->at(t)));  // fails when not found
+                    }
+                }
+                return ret;
+            }
+
+            void restrict_lang(const BasicTerm& t, const mata::nfa::ColorsNfa& restr_nfa) {
+                (*this)[t] = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::intersection(restr_nfa, *this->at(t)));
+            }
+
+            // //! why tf am I putting this right there
+            // ColorAutAssignment create_color_assignment(AutAssignment aut_ass) {
+            // }
 
     };
 

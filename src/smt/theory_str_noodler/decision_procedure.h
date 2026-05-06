@@ -117,6 +117,7 @@ namespace smt::noodler {
         std::unordered_set<BasicTerm> init_length_sensitive_vars;
         Formula formula;
         AutAssignment init_aut_ass;
+        ColorAutAssignment init_color_aut_ass;
         std::unordered_map<BasicTerm, std::vector<BasicTerm>> init_substitution_map;
         ConversionHandler conversion_handler;
         ast_manager& m;
@@ -232,7 +233,18 @@ namespace smt::noodler {
          * 
          * @return Unordered map where for each varaible there is a new language
          */
-        AutAssignment get_product_languages(SolvingState& solving_state, const std::vector<BasicTerm>& lhs_vars, const std::vector<BasicTerm>& rhs_vars);
+        ColorAutAssignment get_product_languages(SolvingState& solving_state, const std::vector<BasicTerm>& lhs_vars, const std::vector<BasicTerm>& rhs_vars);
+
+        std::vector<mata::nfa::ColorsNfa> get_segment_colors(std::vector<mata::nfa::Nfa> segments, mata::nfa::ColorsNfa &product);
+
+        std::vector<mata::nfa::ColorsNfa> process_colorful_noodles(SolvingState &solving_state, mata::nfa::ColorsNfa product_pres_eps_trans, mata::nfa::ColorFormula *cf);
+        // std::vector<mata::nfa::ColorsNfa> process_colorful_noodles(SolvingState &solving_state, mata::nfa::ColorsNfa product_pres_eps_trans);
+
+        // todo helper should delete
+        // void print_product_with_colors(ColorAutAssignment color_aut_ass, SolvingState solving_state, const std::vector<BasicTerm>& lhs_vars, const std::vector<BasicTerm>& rhs_vars);
+        void print_product_with_colors(ColorAutAssignment color_aut_ass, mata::nfa::ColorFormula cf, SolvingState solving_state, const std::vector<BasicTerm>& lhs_vars, const std::vector<BasicTerm>& rhs_vars);
+
+        bool trim_accept_formula(SolvingState solving_state/*, mata::nfa::ColorSet color_set*/);
 
         /**
          * @brief Heuristic method based on only epsilon-product generation and refining languages based on this product
@@ -386,6 +398,7 @@ namespace smt::noodler {
         ) : init_length_sensitive_vars(init_length_sensitive_vars),
             formula(formula),
             init_aut_ass(init_aut_ass),
+            init_color_aut_ass(ColorAutAssignment(init_aut_ass)),
             conversion_handler(conversions, par.m_underapprox_length),
             m(m),
             m_params(par) {

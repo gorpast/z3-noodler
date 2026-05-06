@@ -26,6 +26,10 @@ namespace smt::noodler {
         // of the automata from these variables). Each variable is either assigned in aut_ass or
         // substituted in substitution_map, but not both!
         AutAssignment aut_ass;
+        ColorAutAssignment color_aut_ass;
+        mata::nfa::ColorFormula accept_formula = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And); // now invalid cause And doesnt have child
+        int color_counter = 0;
+
         std::unordered_map<BasicTerm, std::vector<BasicTerm>> substitution_map;
 
         // set of inclusions (i.e. Predicate must be of type equations which we pretend is an inclusion) where we are trying to find aut_ass + substitution_map such that they hold
@@ -67,6 +71,7 @@ namespace smt::noodler {
                      Formula disequations = {},
                      std::vector<TermConversion> conversions = {})
                         : aut_ass(aut_ass),
+                          color_aut_ass(ColorAutAssignment(aut_ass)),
                           substitution_map(substitution_map),
                           inclusions(inclusions),
                           transducers(transducers),

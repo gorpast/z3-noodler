@@ -8,6 +8,7 @@
 #include <chrono>
 
 #include <mata/applications/strings.hh>
+#include <mata/nfa/colors.hh>
 #include "util.h"
 #include "aut_assignment.h"
 #include "decision_procedure.h"
@@ -54,7 +55,7 @@ namespace smt::noodler {
         bool changed = false;
 
         // count total number of occurences for each variable
-        for (int ind = start; ind < equations.size(); ind++) {
+        for (size_t ind = start; ind < equations.size(); ind++) {
             Predicate curEq = equations[ind];
             // get left side
             tmp_map = curEq.variable_count(Predicate::EquationSideType::Left);
@@ -78,6 +79,7 @@ namespace smt::noodler {
     }
 
     /// END OF JUST ATTEMPT !!!!!!!!!! SHOULD REMOVE THEM SOON !!!!!! 
+
     lbool DecisionProcedure::compute_next_solution() {
         // We call the one with length checks but don't check them
         return compute_next_solution_with_len_checks(nullptr).first;
@@ -308,44 +310,44 @@ namespace smt::noodler {
         // My attempt => testing propreties when we call single product heuristic just before noodlification 
         // NODE this thing won't work I know it
 
-        auto start = std::chrono::system_clock::now();
+        // auto start = std::chrono::system_clock::now();
 
-        int init_predicate_size = solving_state.predicates_to_process.size();
+        // int init_predicate_size = solving_state.predicates_to_process.size();
 
-        // copying shouldn't alter anything
-        SolvingState tmp_state = solving_state;
+        // // copying shouldn't alter anything
+        // SolvingState tmp_state = solving_state;
 
-        STRACE(str, tout << "SPH start\n");
-        // STRACE(str, tout << tmp_state.aut_ass.print());
+        // STRACE(str, tout << "SPH start\n");
+        // // STRACE(str, tout << tmp_state.aut_ass.print());
 
-        // loop while can loop through temporary process
-        for (int process_count = 0; process_count < init_predicate_size; process_count++)
-        {
-            // pick current predicates to be processed
-            Predicate predicate_to_process = tmp_state.predicates_to_process[process_count];
+        // // loop while can loop through temporary process
+        // for (int process_count = 0; process_count < init_predicate_size; process_count++)
+        // {
+        //     // pick current predicates to be processed
+        //     Predicate predicate_to_process = tmp_state.predicates_to_process[process_count];
 
-            // STRACE(str, tout << "Predicate" << predicate_to_process << "\n");
+        //     // STRACE(str, tout << "Predicate" << predicate_to_process << "\n");
 
-            // don't know what to do with transducers
-            if (predicate_to_process.is_equation()) { // inclusion
-                // STRACE(str, tout << "Using SPH for inclusion: " << predicate_to_process << "\n");
-                // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
-                if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
-                    // STRACE(str, tout << "Found UNSAT in single product heuristic\n");
-                    auto dur = std::chrono::system_clock::now() - start;
-                    STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
-                    STRACE(str, tout << "SPH UNSAT\n");
-                    return;
-                }
-            } else {
-                SASSERT(predicate_to_process.is_transducer());
-                break;
-            }
+        //     // don't know what to do with transducers
+        //     if (predicate_to_process.is_equation()) { // inclusion
+        //         // STRACE(str, tout << "Using SPH for inclusion: " << predicate_to_process << "\n");
+        //         // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
+        //         if (!process_inclusion_single_product(predicate_to_process, tmp_state)) {
+        //             // STRACE(str, tout << "Found UNSAT in single product heuristic\n");
+        //             auto dur = std::chrono::system_clock::now() - start;
+        //             STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
+        //             STRACE(str, tout << "SPH UNSAT\n");
+        //             return;
+        //         }
+        //     } else {
+        //         SASSERT(predicate_to_process.is_transducer());
+        //         break;
+        //     }
 
-        } 
-        auto dur = std::chrono::system_clock::now() - start;
-        STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
-        STRACE(str, tout << "SPH SAT\n");
+        // } 
+        // auto dur = std::chrono::system_clock::now() - start;
+        // STRACE(str, tout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "\n");
+        // STRACE(str, tout << "SPH SAT\n");
 
         /// JUst dumb copying TODO change it !!!!!!
 
@@ -990,67 +992,214 @@ namespace smt::noodler {
     }
 
     // help function for concatenation using epsilon - didn't find noodler version - TODO find it ?? 
-    mata::nfa::Nfa epsilon_concatenation(const std::vector<std::shared_ptr<mata::nfa::Nfa>>& nfas) {
-        mata::nfa::Nfa concatenation{*nfas[0]};
-        // for every automata concatenate it to the result with epsilon
+    mata::nfa::ColorsNfa epsilon_concatenation(const std::vector<std::shared_ptr<mata::nfa::ColorsNfa>>& nfas) {
+        // // now not concatenating over epsilon - just normal concatenation
+        // mata::nfa::ColorsNfa first_copy = *nfas[0];
+        // for (size_t i = 1; i < nfas.size(); ++i) {
+        //     first_copy.concatenate(*nfas[i]);
+        // }
+        // return first_copy;
+
+        mata::nfa::ColorsNfa concatenation{*nfas[0]};
+
+        //for every automata concatenate it to the result with epsilon
         for (size_t i = 1; i < nfas.size(); ++i) {
-            concatenation = mata::nfa::concatenate(concatenation, *nfas[i], mata::nfa::EPSILON);
+            concatenation = mata::nfa::concatenate(concatenation, *nfas[i]);
         }
         return concatenation;
     }
 
-    AutAssignment DecisionProcedure::get_product_languages(SolvingState& solving_state, const std::vector<BasicTerm>& lhs_vars, const std::vector<BasicTerm>& rhs_vars) {
-        // Get automata of the variables on the left side
-        STRACE(str_nfa, tout << "Left automata:" << std::endl);
-        auto [lhs_automata, lhs_division] = solving_state.get_automata_and_division_of_concatenation(lhs_vars, false);
-        SASSERT(lhs_division.size() == lhs_vars.size()); // each division should contain exactly one left variable
-        SASSERT(lhs_automata.size() == lhs_division.size()); // we have one automaton for each division
+    bool DecisionProcedure::trim_accept_formula(SolvingState solving_state/*, mata::nfa::ColorSet color_set*/) {
+        mata::nfa::ColorSet color_set;
+        for (auto aut : solving_state.color_aut_ass) {
+
+            mata::nfa::ColorsNfa caut = *aut.second;
+            for (size_t ind = 0; ind < caut.num_of_states(); ind++) {
+                color_set.merge(caut.get_color_set(ind));
+            }
+        }
+        solving_state.accept_formula = solving_state.accept_formula.trim_formula(color_set);
+        return solving_state.accept_formula.ops != mata::nfa::ColorFormula::OperatorType::False;
+    }
+
+    std::vector<mata::nfa::ColorsNfa> DecisionProcedure::get_segment_colors(std::vector<mata::nfa::Nfa> segments, mata::nfa::ColorsNfa &product) {
+        //!  I am working with the ASSUMPTION that the segment still inherit original state numbers from the product
+        std::vector<mata::nfa::ColorsNfa> color_segments = {};
+        for (size_t ind = 0; ind < segments.size(); ind++) {
+            mata::nfa::ColorsNfa cseg = mata::nfa::ColorsNfa(segments[ind], mata::nfa::ColorFormula());
+
+            cseg.inherit_colors(product);
+
+            color_segments.push_back(cseg);
+        }
+
+        return color_segments;
+    }
+
+    std::vector<mata::nfa::ColorsNfa> DecisionProcedure::process_colorful_noodles(SolvingState &solving_state, mata::nfa::ColorsNfa product_pres_eps_trans, mata::nfa::ColorFormula *cf) {
+        // own segmentation of epsilon product
+        mata::applications::strings::seg_nfa::Segmentation segmentation{product_pres_eps_trans, { mata::nfa::EPSILON }};
+
+        //! will they have the same State names as the intial product automaton ???
+        const std::vector<mata::nfa::Nfa>& segments{ segmentation.get_untrimmed_segments() };
+
+        STRACE(str, tout << "segmentation color inheritance\n");
+        std::vector<mata::nfa::ColorsNfa> color_segments = get_segment_colors(segments, product_pres_eps_trans);
+
+        mata::nfa::ColorFormula new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And);
+        for (unsigned int ind = 0; ind < color_segments.size() - 1; ind++) {
+
+            color_segments[ind] = color_segments[ind].trim();
+
+            new_disjunct.add_child(mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::Occurs, ++solving_state.color_counter));
+            // add new color to all segments
+            // to each state add new color
+            for (mata::nfa::State s = 0; s < color_segments[ind].num_of_states(); s++) {
+
+                color_segments[ind].add_color_to_current(s, {solving_state.color_counter});
+            }
+        }
+
+
+        // TODO for now decided to work with full segments - assigning colors to full segments
+        // // should work better with these arguments
+        // auto noodles = mata::applications::strings::seg_nfa::noodlify(product_pres_eps_trans, mata::nfa::EPSILON, false, true);
+
+        // STRACE(str, tout << "processing noodles\n");
+        // mata::nfa::ColorFormula new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::Or);
+
+        // //! im running on assumption that noodle contains all segments and the only difference is that only a few epsilon transitions exists in the automaton
+        // for (auto noodle : noodles) {
+
+        //     mata::nfa::ColorFormula new_formula = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And);
+        //     // need to skip last segment
+        //     for (unsigned int ind = 0; ind < noodle.size() - 1; ind++) {
+        //         //! I made a decision that for now I would color only final states for given noodle
+        //         // TODO assumption noodles and segments has the same ordering (noodles are not trimmed)
+        //         // TODO final state of noodle segment -> there should be just one
+        //         SASSERT((*noodle[ind]).final.size() == 1);
+        //         for (const mata::nfa::State final_state: (*noodle[ind]).final) {
+        //             // STRACE(str, tout << ind << " seg ind; " << final_state << "\n");
+        //             // STRACE(str, tout << (*noodle[ind]) << "\n");
+
+        //             color_segments[ind].add_color_to_current(final_state, {++solving_state.color_counter});
+        //         }
+
+        //         new_formula.add_child(mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::Occurs, solving_state.color_counter));
+
+        //     }
+
+        //     new_disjunct.add_child(new_formula);
+        // }
+
+        solving_state.accept_formula.add_child(new_disjunct);
+        *cf = new_disjunct;
+
+        return color_segments;
+    }
+
+    void DecisionProcedure::print_product_with_colors(ColorAutAssignment color_aut_ass, mata::nfa::ColorFormula cf, SolvingState solving_state, const std::vector<BasicTerm>& lhs_vars, const std::vector<BasicTerm>& rhs_vars) {
+
+        std::vector<std::shared_ptr<mata::nfa::ColorsNfa>> lhs_automata = {};
+        for (auto &var : lhs_vars) {
+
+            lhs_automata.push_back(color_aut_ass[var]);
+        }
 
         // concatenation of lhs using epsilon transition - these transition will then be removed during segmatation
-        mata::nfa::Nfa concatenated_lhs = epsilon_concatenation(lhs_automata);
+        mata::nfa::ColorsNfa concatenated_lhs = epsilon_concatenation(lhs_automata);
+
 
         // ordinary concatenation of right hand side
-        mata::nfa::Nfa concatenated_rhs = solving_state.aut_ass.get_automaton_concat(rhs_vars);
+        mata::nfa::ColorsNfa concatenated_rhs = color_aut_ass.get_automaton_concat(rhs_vars, solving_state.aut_ass);
 
-        auto product_pres_eps_trans{
-                mata::nfa::intersection(concatenated_lhs, concatenated_rhs).trim() };
 
+        mata::nfa::ColorsNfa product_pres_eps_trans = 
+                mata::nfa::intersection(concatenated_lhs, concatenated_rhs, mata::nfa::EPSILON).trim();
+
+        // product_pres_eps_trans.set_accept_formula(solving_state.accept_formula);
+        product_pres_eps_trans.set_accept_formula(cf);
+        STRACE(str, tout << "_START_\n" << product_pres_eps_trans.print_to_dot() << "_END_\n");
+
+    }
+
+    ColorAutAssignment DecisionProcedure::get_product_languages(SolvingState& solving_state, const std::vector<BasicTerm>& lhs_vars, const std::vector<BasicTerm>& rhs_vars) {
+        //! for now I just need variable on left hand side without division
+        // Get automata of the variables on the left side
+        // STRACE(str_nfa, tout << "Left automata:" << std::endl);
+        // auto [lhs_automata, lhs_division] = solving_state.get_automata_and_division_of_concatenation(lhs_vars, false);
+        // SASSERT(lhs_division.size() == lhs_vars.size()); // each division should contain exactly one left variable
+        // SASSERT(lhs_automata.size() == lhs_division.size()); // we have one automaton for each division
+
+        STRACE(str, tout << "Getting automata size: of color_aut_ass " << solving_state.color_aut_ass.size() << "\n");
+        std::vector<std::shared_ptr<mata::nfa::ColorsNfa>> lhs_automata = {};
+        for (auto &var : lhs_vars) {
+            // TODO this is problem I dont update color aut ass everywhere -so get data from color aut ass
+            if (solving_state.color_aut_ass.find(var) == solving_state.color_aut_ass.end()) {
+                mata::nfa::ColorsNfa cf = mata::nfa::ColorsNfa(*solving_state.aut_ass[var], mata::nfa::ColorFormula());
+                lhs_automata.push_back(std::make_shared<mata::nfa::ColorsNfa>(cf));
+
+            } else {
+                lhs_automata.push_back(solving_state.color_aut_ass[var]);
+            }
+        }
+
+        STRACE(str, tout << "epsilon concatenation\n");
+        // concatenation of lhs using epsilon transition - these transition will then be removed during segmatation
+        mata::nfa::ColorsNfa concatenated_lhs = epsilon_concatenation(lhs_automata);
+
+
+        // ordinary concatenation of right hand side
+        STRACE(str, tout << "normal concatenation\n");
+        mata::nfa::ColorsNfa concatenated_rhs = solving_state.color_aut_ass.get_automaton_concat(rhs_vars, solving_state.aut_ass);
+
+
+        STRACE(str, tout << "okay so there is product intersection\n");
+        mata::nfa::ColorsNfa product_pres_eps_trans = 
+                mata::nfa::intersection(concatenated_lhs, concatenated_rhs, mata::nfa::EPSILON).trim();
+
+        //! dont care about lang empty for now
         if (product_pres_eps_trans.is_lang_empty()) {
             return {};
         }
 
-        STRACE(str, tout << "I'm hefafdasfasfasreee\n");
-        product_pres_eps_trans = mata::nfa::reduce(product_pres_eps_trans);
+        product_pres_eps_trans.set_accept_formula(solving_state.accept_formula);
 
-        // own segmentation of epsilon product
-        mata::applications::strings::seg_nfa::Segmentation segmentation{product_pres_eps_trans, { mata::nfa::EPSILON }};
-        const auto& segments{ segmentation.get_segments() };
+        // product_pres_eps_trans = mata::nfa::reduce(product_pres_eps_trans);
 
-        // STRACE(str, tout << "I'm got segments  reee\n");
+        //! now I need to go to noodlification and correctly add disjunctions to accept formula + add colors to the states
+        mata::nfa::ColorFormula cf;
+        std::vector<mata::nfa::ColorsNfa> color_segments = process_colorful_noodles(solving_state, product_pres_eps_trans, &cf);
+
+        STRACE(str, tout << product_pres_eps_trans.print_to_dot());
+
+
         // performing necesarry intersection and moving segments to resulting aut assignment
-        AutAssignment eps_product_lang = {};
+        ColorAutAssignment eps_product_lang = {};
         for (unsigned ind = 0; ind < lhs_vars.size(); ind++) {
             BasicTerm left_var = lhs_vars[ind];
             // there is not left var in result language
             if (eps_product_lang.find(left_var) == eps_product_lang.end()) {
-                eps_product_lang[left_var] = std::make_shared<mata::nfa::Nfa>(segments[ind]);
+                eps_product_lang[left_var] = std::make_shared<mata::nfa::ColorsNfa>(color_segments[ind]);
             } else {
-                eps_product_lang.restrict_lang(left_var, segments[ind]);
+                eps_product_lang.restrict_lang(left_var, color_segments[ind]);
             }
         }
 
-        // trimming can help a little bit
-        for (const auto &x : solving_state.aut_ass) {
+        // if (trim_accept_formula(solving_state)) {
+        //     STRACE(str, tout << "Found UNSAT with colorful automata\n");
+        // }
 
-            solving_state.aut_ass[x.first] = std::make_shared<mata::nfa::Nfa>((*x.second).trim());
-            // if ((*solving_state.aut_ass[x.first]).num_of_states() > 10000) {
-            //     STRACE(str, tout << "Start BNCH:\n" << *(solving_state.aut_ass[x.first]) << "End BNCH\n");
-            // }
+        // trimming can help a little bit
+        STRACE(str, tout << "trimming eps product languages\n");
+        for (const auto &x : eps_product_lang) {
+
+            eps_product_lang[x.first] = std::make_shared<mata::nfa::ColorsNfa>((*x.second).trim());
         }
 
 
         // another reduction - don't know if necesarry
-        eps_product_lang.reduce();
+        // eps_product_lang.reduce();
 
         return eps_product_lang;
     }
@@ -1080,6 +1229,16 @@ namespace smt::noodler {
 
         } 
 
+        STRACE(str, tout << "COLORS printing\n");
+        for (int processed_count = 0; processed_count < init_predicate_size; processed_count++)
+        {
+            Predicate inclusion = process_state.predicates_to_process[processed_count];
+            const auto &lhs_vars = inclusion.get_left_side();
+            const auto &rhs_vars = inclusion.get_right_side();
+            print_product_with_colors(process_state.color_aut_ass, process_state.accept_formula.children[processed_count], process_state, lhs_vars, rhs_vars);
+        }
+
+
         // pushing process state back - think it doesnt depend second argument
         push_to_worklist(std::move(process_state), false);
     }
@@ -1096,27 +1255,34 @@ namespace smt::noodler {
         // }
 
         // get new languages from epsilon product
-        AutAssignment product_aut_ass = get_product_languages(solving_state, left_side_vars, right_side_vars);
+        STRACE(str, tout << "At start of get product languages\n");
+        ColorAutAssignment product_aut_ass = get_product_languages(solving_state, left_side_vars, right_side_vars);
         if (product_aut_ass.size() == 0) return false;
 
+        //! TODO do something with restricting languages
         // perform intersection of current languages and new product languages
+
         for (const auto &left_var : left_side_vars) {
-            solving_state.aut_ass.restrict_lang(left_var, *product_aut_ass.at(left_var));
+            // there is not left var in result language
+            if (solving_state.color_aut_ass.find(left_var) == solving_state.color_aut_ass.end()) {
+                solving_state.color_aut_ass[left_var] = product_aut_ass.at(left_var);
+            } else {
+                solving_state.color_aut_ass.restrict_lang(left_var, *product_aut_ass.at(left_var));
+            }
         }
 
+        STRACE(str, tout << "At start of trimming process inclusion\n");
         // trimming can help a little bit
-        for (const auto &x : solving_state.aut_ass) {
+        for (const auto &x : solving_state.color_aut_ass) {
 
-            solving_state.aut_ass[x.first] = std::make_shared<mata::nfa::Nfa>((*x.second).trim());
-            // if ((*solving_state.aut_ass[x.first]).num_of_states() > 10000) {
-            //     STRACE(str, tout << "Start BNCH:\n" << *(solving_state.aut_ass[x.first]) << "End BNCH\n");
-            // }
+            solving_state.color_aut_ass[x.first] = std::make_shared<mata::nfa::ColorsNfa>((*x.second).trim());
         }
 
         // another reduction - don't know if necesarry
-        solving_state.aut_ass.reduce();
+        // solving_state.aut_ass.reduce();
 
-        return solving_state.aut_ass.is_sat();
+        // return solving_state.aut_ass.is_sat();
+        return true;
     }
 
     /**
@@ -1165,6 +1331,7 @@ namespace smt::noodler {
         SolvingState init_solving_state;
         init_solving_state.length_sensitive_vars = std::move(this->init_length_sensitive_vars);
         init_solving_state.aut_ass = std::move(this->init_aut_ass);
+        init_solving_state.color_aut_ass = std::move(this->init_color_aut_ass);
         for (const auto& subs : init_substitution_map) {
             init_solving_state.aut_ass.erase(subs.first);
         }
@@ -1222,7 +1389,7 @@ namespace smt::noodler {
 
         // temporary place for single product heuristic
         // this version call product heuristic one step at time from noodlification step
-        // single_product_heuristic();
+        single_product_heuristic();
     }
 
     lbool DecisionProcedure::preprocess(PreprocessType opt, const BasicTermEqiv &len_eq_vars) {
