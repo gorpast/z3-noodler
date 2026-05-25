@@ -442,7 +442,8 @@ namespace smt::noodler {
                         ret.concatenate(non_color);  // fails when not found
                     } else {
                         // TODO I want it to run at least somehow so I will set vars not in colors_aut_ass to non color version of aut assignment
-                        STRACE(str, tout << "im at: " << t << "\n");
+                        // STRACE(str, tout << "im at: " << t << "\n");
+                        // STRACE(str, tout << (*(this->at(t))).print_to_dot());
                         ret.concatenate(*(this->at(t)));  // fails when not found
                     }
                 }
@@ -459,7 +460,7 @@ namespace smt::noodler {
             void reduce() {
                 STRACE(str, tout<< "Reducing\n");
                 for (auto& pr : *this) {
-                    STRACE(str, tout << "im not done\n" << (*pr.second).print_to_dot());
+                    STRACE(str, tout << "im not done " << pr.first<<"\n" << (*pr.second).print_to_dot());
                     pr.second = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::reduce(*pr.second));
                     STRACE(str, tout << "im done\n" << (*pr.second).print_to_dot());
                 }

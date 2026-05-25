@@ -18,6 +18,14 @@
 namespace smt::noodler {
 
     lbool DecisionProcedure::compute_next_solution() {
+        // temporary place for single product heuristic
+        // this version call product heuristic one step at time from noodlification step
+        // int result = single_product_heuristic();
+        // if (result == l_true) {
+        //     return l_true;
+        // } else if (result == l_false) {
+        //     return l_false;
+        // }
         // We call the one with length checks but don't check them
         return compute_next_solution_with_len_checks(nullptr).first;
     }
@@ -950,6 +958,7 @@ namespace smt::noodler {
         mata::nfa::ColorSet color_set;
         for (auto aut : solving_state.color_aut_ass) {
 
+            STRACE(str, tout << aut.first << " Automat: " << (*aut.second).print_to_dot() << std::endl);
             mata::nfa::ColorsNfa caut = *aut.second;
             for (size_t ind = 0; ind < caut.num_of_states(); ind++) {
                 color_set.merge(caut.get_color_set(ind));
@@ -983,7 +992,14 @@ namespace smt::noodler {
         STRACE(str, tout << "segmentation color inheritance\n");
         std::vector<mata::nfa::ColorsNfa> color_segments = get_segment_colors(segments, product_pres_eps_trans);
 
-        mata::nfa::ColorFormula new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And);
+        STRACE(str, tout << "AAAAA Segment size: " << color_segments.size());
+
+        mata::nfa::ColorFormula new_disjunct;
+        if (color_segments.size() == 1) {
+            new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::True);
+        } else {
+            new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And);
+        }
         for (unsigned int ind = 0; ind < color_segments.size() - 1; ind++) {
 
             color_segments[ind] = color_segments[ind].trim();
@@ -1045,10 +1061,12 @@ namespace smt::noodler {
 
         // concatenation of lhs using epsilon transition - these transition will then be removed during segmatation
         mata::nfa::ColorsNfa concatenated_lhs = epsilon_concatenation(lhs_automata);
+        STRACE(str, tout << concatenated_lhs.print_to_dot());
 
 
         // ordinary concatenation of right hand side
         mata::nfa::ColorsNfa concatenated_rhs = color_aut_ass.get_automaton_concat(rhs_vars, solving_state.aut_ass);
+        STRACE(str, tout << concatenated_rhs.print_to_dot());
 
 
         mata::nfa::ColorsNfa product_pres_eps_trans = 
@@ -1108,14 +1126,13 @@ namespace smt::noodler {
         mata::nfa::ColorFormula cf;
         std::vector<mata::nfa::ColorsNfa> color_segments = process_colorful_noodles(solving_state, product_pres_eps_trans, &cf);
 
+        product_pres_eps_trans.set_accept_formula(solving_state.accept_formula);
         STRACE(str, tout << product_pres_eps_trans.print_to_dot());
 
 
         // performing necesarry intersection and moving segments to resulting aut assignment
         ColorAutAssignment eps_product_lang = {};
         for (unsigned ind = 0; ind < lhs_vars.size(); ind++) {
-            STRACE(str, tout << "ifasdfda: " << ind<< " " << lhs_vars[ind] << std::endl);
-            STRACE(str, tout << "fsdafdsa:\n" << color_segments[ind]);
             BasicTerm left_var = lhs_vars[ind];
             // there is not left var in result language
             if (eps_product_lang.find(left_var) == eps_product_lang.end()) {
@@ -1123,6 +1140,7 @@ namespace smt::noodler {
             } else {
                 eps_product_lang.restrict_lang(left_var, color_segments[ind]);
             }
+            STRACE(str, tout << left_var << " megafsfbvcad cool var\n" << (*eps_product_lang[left_var]).print_to_dot());
         }
 
         // trimming can help a little bit
@@ -1130,16 +1148,20 @@ namespace smt::noodler {
         for (const auto &x : eps_product_lang) {
 
             eps_product_lang[x.first] = std::make_shared<mata::nfa::ColorsNfa>((*x.second).trim());
+            STRACE(str, tout << x.first << " epsilon trimming\n" << (*x.second).print_to_dot());
         }
-
 
         // another reduction - don't know if necesarry
         eps_product_lang.reduce();
 
+
+        STRACE(str, tout << "PRINTING that omportant product - should see colors\n");
+        print_product_with_colors(eps_product_lang, cf, solving_state, lhs_vars, rhs_vars);
+
         return eps_product_lang;
     }
 
-    void DecisionProcedure::single_product_heuristic() {
+    lbool DecisionProcedure::single_product_heuristic() {
         STRACE(str, tout << "Single product heuristic...\n");
         // getting current state
         SolvingState process_state = pop_from_worklist();
@@ -1156,7 +1178,7 @@ namespace smt::noodler {
             if (predicate_to_process.is_equation()) { // inclusion
                 // if found UNSAT inclusion - this solving state is UNSAT - just return no pushing to worklist
                 if (!process_inclusion_single_product(predicate_to_process, process_state)) {
-                    return;
+                    return l_false;
                 }
             } else {
                 SASSERT(predicate_to_process.is_transducer());
@@ -1176,6 +1198,7 @@ namespace smt::noodler {
 
         // pushing process state back - think it doesnt depend second argument
         push_to_worklist(std::move(process_state), false);
+        return l_true;
     }
 
     bool DecisionProcedure::process_inclusion_single_product(Predicate& inclusion, SolvingState& solving_state) {
@@ -1199,11 +1222,14 @@ namespace smt::noodler {
 
         for (const auto &left_var : left_side_vars) {
             // there is not left var in result language
+            // STRACE(str, tout << left_var << " coofdasfdsafl var\n" << (*product_aut_ass[left_var]).print_to_dot());
             if (solving_state.color_aut_ass.find(left_var) == solving_state.color_aut_ass.end()) {
                 solving_state.color_aut_ass[left_var] = product_aut_ass.at(left_var);
             } else {
+                // STRACE(str, tout << "old automata\n" << (*solving_state.color_aut_ass[left_var]).print_to_dot());
                 solving_state.color_aut_ass.restrict_lang(left_var, *product_aut_ass.at(left_var));
             }
+            // STRACE(str, tout << left_var << " cool var\n" << (*solving_state.color_aut_ass[left_var]).print_to_dot());
         }
 
         STRACE(str, tout << "At start of trimming process inclusion\n");
@@ -1219,6 +1245,7 @@ namespace smt::noodler {
         STRACE(str, tout<< "Checking the truth\n");
         if (!trim_accept_formula(solving_state)) {
             STRACE(str, tout << "Found UNSAT with colorful automata\n");
+            return false;
         }
 
         // return solving_state.aut_ass.is_sat();

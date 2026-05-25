@@ -254,7 +254,7 @@ namespace smt::noodler {
          * Overapproximates languages - if finds UNSAT, can return UNSAT (or in fact wouldn't push back solving state)
          * if end languages are satisfiable - works with refined languages
          */
-        void single_product_heuristic();
+        lbool single_product_heuristic();
 
         /**
          * @brief Processes inclusion from inclusion graph and eventually refines solving state languages
