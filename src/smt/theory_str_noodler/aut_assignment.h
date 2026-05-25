@@ -453,6 +453,17 @@ namespace smt::noodler {
                 (*this)[t] = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::intersection(restr_nfa, *this->at(t)));
             }
 
+            /**
+             * @brief Reduce all automata occurring in the map.
+             */
+            void reduce() {
+                STRACE(str, tout<< "Reducing\n");
+                for (auto& pr : *this) {
+                    STRACE(str, tout << "im not done\n" << (*pr.second).print_to_dot());
+                    pr.second = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::reduce(*pr.second));
+                    STRACE(str, tout << "im done\n" << (*pr.second).print_to_dot());
+                }
+            }
             // //! why tf am I putting this right there
             // ColorAutAssignment create_color_assignment(AutAssignment aut_ass) {
             // }

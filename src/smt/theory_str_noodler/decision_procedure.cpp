@@ -17,69 +17,6 @@
 
 namespace smt::noodler {
 
-    /*** MY HELPER FUNCTION FOR JUST A RANDOM ATTEPMT */
-    /**** !!!!!!!!!!!!!!!!!!!! HAS TO REMOVE THEM !!!!!!!!!!!!!!!!!! */
-
-    void add_data_to_map(std::map<BasicTerm, unsigned>& first_map, std::map<BasicTerm, unsigned>& second_map)
-    {
-        for (auto const& var_tuple : second_map)
-        {
-            if (!var_tuple.first.is_variable())
-            {
-                continue;
-            } 
-            std::map<BasicTerm, unsigned>::iterator it = first_map.find(var_tuple.first);
-            if (it != first_map.end())
-            {
-                it->second += var_tuple.second;
-            } else {
-                first_map.insert({var_tuple.first, var_tuple.second});
-            }
-        }
-    }
-
-    bool is_side_marked(Predicate &eq, std::vector<BasicTerm>& marked_vars, Predicate::EquationSideType side) {
-        for (BasicTerm const& var : eq.get_side(side))
-        {
-            if (find(marked_vars.begin(), marked_vars.end(), var) == marked_vars.end())
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    bool get_marked_variables(std::vector<BasicTerm>& cur_marked_vars, std::deque<Predicate>& equations, int start) {
-        std::map<BasicTerm, unsigned> occur = {};
-        std::map<BasicTerm, unsigned> tmp_map = {};
-        bool changed = false;
-
-        // count total number of occurences for each variable
-        for (size_t ind = start; ind < equations.size(); ind++) {
-            Predicate curEq = equations[ind];
-            // get left side
-            tmp_map = curEq.variable_count(Predicate::EquationSideType::Left);
-            add_data_to_map(occur, tmp_map);
-
-            // get right side
-            tmp_map = curEq.variable_count(Predicate::EquationSideType::Right);
-            add_data_to_map(occur, tmp_map);
-        }
-
-        for (auto const& var : occur) {
-            // STRACE(str, tout << "Variable " << var.second << " " << var.second << "\n");
-            if (var.second == 1 && var.first.is_variable())
-            {
-                cur_marked_vars.push_back(var.first);
-                changed = true;
-            }
-        }
-
-        return changed;
-    }
-
-    /// END OF JUST ATTEMPT !!!!!!!!!! SHOULD REMOVE THEM SOON !!!!!! 
-
     lbool DecisionProcedure::compute_next_solution() {
         // We call the one with length checks but don't check them
         return compute_next_solution_with_len_checks(nullptr).first;
@@ -1165,7 +1102,7 @@ namespace smt::noodler {
 
         product_pres_eps_trans.set_accept_formula(solving_state.accept_formula);
 
-        // product_pres_eps_trans = mata::nfa::reduce(product_pres_eps_trans);
+        product_pres_eps_trans = mata::nfa::reduce(product_pres_eps_trans);
 
         //! now I need to go to noodlification and correctly add disjunctions to accept formula + add colors to the states
         mata::nfa::ColorFormula cf;
@@ -1177,6 +1114,8 @@ namespace smt::noodler {
         // performing necesarry intersection and moving segments to resulting aut assignment
         ColorAutAssignment eps_product_lang = {};
         for (unsigned ind = 0; ind < lhs_vars.size(); ind++) {
+            STRACE(str, tout << "ifasdfda: " << ind<< " " << lhs_vars[ind] << std::endl);
+            STRACE(str, tout << "fsdafdsa:\n" << color_segments[ind]);
             BasicTerm left_var = lhs_vars[ind];
             // there is not left var in result language
             if (eps_product_lang.find(left_var) == eps_product_lang.end()) {
@@ -1185,10 +1124,6 @@ namespace smt::noodler {
                 eps_product_lang.restrict_lang(left_var, color_segments[ind]);
             }
         }
-
-        // if (trim_accept_formula(solving_state)) {
-        //     STRACE(str, tout << "Found UNSAT with colorful automata\n");
-        // }
 
         // trimming can help a little bit
         STRACE(str, tout << "trimming eps product languages\n");
@@ -1199,7 +1134,7 @@ namespace smt::noodler {
 
 
         // another reduction - don't know if necesarry
-        // eps_product_lang.reduce();
+        eps_product_lang.reduce();
 
         return eps_product_lang;
     }
@@ -1279,7 +1214,12 @@ namespace smt::noodler {
         }
 
         // another reduction - don't know if necesarry
-        // solving_state.aut_ass.reduce();
+        solving_state.color_aut_ass.reduce();
+
+        STRACE(str, tout<< "Checking the truth\n");
+        if (!trim_accept_formula(solving_state)) {
+            STRACE(str, tout << "Found UNSAT with colorful automata\n");
+        }
 
         // return solving_state.aut_ass.is_sat();
         return true;
