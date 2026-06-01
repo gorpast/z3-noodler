@@ -30,6 +30,12 @@ namespace smt::noodler {
         return compute_next_solution_with_len_checks(nullptr).first;
     }
 
+    std::pair<lbool, bool> DecisionProcedure::compute_next_solution_colorful() {
+        //! now I dont care about length constraints
+        // should find out how it could work
+        return {single_product_heuristic(), false};
+    }
+
     std::pair<lbool, bool> DecisionProcedure::compute_next_solution_with_len_checks(
         std::function<lbool(bool)> check_lens
     ) {
@@ -968,6 +974,7 @@ namespace smt::noodler {
         return solving_state.accept_formula.ops != mata::nfa::ColorFormula::OperatorType::False;
     }
 
+// TODO replace this with special functions in mata
     std::vector<mata::nfa::ColorsNfa> DecisionProcedure::get_segment_colors(std::vector<mata::nfa::Nfa> segments, mata::nfa::ColorsNfa &product) {
         //!  I am working with the ASSUMPTION that the segment still inherit original state numbers from the product
         std::vector<mata::nfa::ColorsNfa> color_segments = {};
@@ -994,62 +1001,63 @@ namespace smt::noodler {
 
         STRACE(str, tout << "AAAAA Segment size: " << color_segments.size());
 
-        mata::nfa::ColorFormula new_disjunct;
-        if (color_segments.size() == 1) {
-            new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::True);
-        } else {
-            new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And);
-        }
-        for (unsigned int ind = 0; ind < color_segments.size() - 1; ind++) {
+        // mata::nfa::ColorFormula new_disjunct;
+        // if (color_segments.size() == 1) {
+        //     new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::True);
+        // } else {
+        //     new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And);
+        // }
+        // for (unsigned int ind = 0; ind < color_segments.size() - 1; ind++) {
 
-            color_segments[ind] = color_segments[ind].trim();
+        //     color_segments[ind] = color_segments[ind].trim();
 
-            new_disjunct.add_child(mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::Occurs, ++solving_state.color_counter));
-            // add new color to all segments
-            // to each state add new color
-            for (mata::nfa::State s = 0; s < color_segments[ind].num_of_states(); s++) {
+        //     new_disjunct.add_child(mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::Occurs, ++solving_state.color_counter));
+        //     // add new color to all segments
+        //     // to each state add new color
+        //     for (mata::nfa::State s = 0; s < color_segments[ind].num_of_states(); s++) {
 
-                color_segments[ind].add_color_to_current(s, {solving_state.color_counter});
-            }
-        }
+        //         color_segments[ind].add_color_to_current(s, {solving_state.color_counter});
+        //     }
+        // }
 
 
         // TODO for now decided to work with full segments - assigning colors to full segments
         // // should work better with these arguments
-        // auto noodles = mata::applications::strings::seg_nfa::noodlify(product_pres_eps_trans, mata::nfa::EPSILON, false, true);
+        auto noodles = mata::applications::strings::seg_nfa::noodlify(product_pres_eps_trans, mata::nfa::EPSILON, false);
 
-        // STRACE(str, tout << "processing noodles\n");
-        // mata::nfa::ColorFormula new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::Or);
+        STRACE(str, tout << "processing noodles\n");
+        mata::nfa::ColorFormula new_disjunct = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::Or);
 
-        // //! im running on assumption that noodle contains all segments and the only difference is that only a few epsilon transitions exists in the automaton
-        // for (auto noodle : noodles) {
+        //! im running on assumption that noodle contains all segments and the only difference is that only a few epsilon transitions exists in the automaton
+        for (auto noodle : noodles) {
 
-        //     mata::nfa::ColorFormula new_formula = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And);
-        //     // need to skip last segment
-        //     for (unsigned int ind = 0; ind < noodle.size() - 1; ind++) {
-        //         //! I made a decision that for now I would color only final states for given noodle
-        //         // TODO assumption noodles and segments has the same ordering (noodles are not trimmed)
-        //         // TODO final state of noodle segment -> there should be just one
-        //         SASSERT((*noodle[ind]).final.size() == 1);
-        //         for (const mata::nfa::State final_state: (*noodle[ind]).final) {
-        //             // STRACE(str, tout << ind << " seg ind; " << final_state << "\n");
-        //             // STRACE(str, tout << (*noodle[ind]) << "\n");
+            mata::nfa::ColorFormula new_formula = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And);
+            // TODO now I color the whole bubbles with given color - even the last one
+            // need to skip last segment
+            for (unsigned int ind = 0; ind < noodle.size(); ind++) {
+                // TODO assumption noodles and segments has the same ordering (noodles are not trimmed)
+                auto color = ++solving_state.color_counter;
 
-        //             color_segments[ind].add_color_to_current(final_state, {++solving_state.color_counter});
-        //         }
+                for (const mata::nfa::State final_state: (*noodle[ind]).final) {
+                    STRACE(str, tout << ind << " seg ind; " << final_state << "\n");
+                    STRACE(str, tout << (*noodle[ind]) << "\n");
 
-        //         new_formula.add_child(mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::Occurs, solving_state.color_counter));
+                    color_segments[ind].add_color_to_current(final_state, {color});
+                }
 
-        //     }
+                new_formula.add_child(mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::Occurs, solving_state.color_counter));
 
-        //     new_disjunct.add_child(new_formula);
-        // }
+            }
+
+            new_disjunct.add_child(new_formula);
+        }
 
         solving_state.accept_formula.add_child(new_disjunct);
         *cf = new_disjunct;
 
         return color_segments;
     }
+// TODO END OF REPLACE WITH
 
     void DecisionProcedure::print_product_with_colors(ColorAutAssignment color_aut_ass, mata::nfa::ColorFormula cf, SolvingState solving_state, const std::vector<BasicTerm>& lhs_vars, const std::vector<BasicTerm>& rhs_vars) {
 
@@ -1109,30 +1117,35 @@ namespace smt::noodler {
         mata::nfa::ColorsNfa concatenated_rhs = solving_state.color_aut_ass.get_automaton_concat(rhs_vars, solving_state.aut_ass);
 
 
-        STRACE(str, tout << "okay so there is product intersection\n");
+        STRACE(str, tout << "okay so there is product intersection\n" << solving_state.accept_formula.print_formula() << std::endl);
         mata::nfa::ColorsNfa product_pres_eps_trans = 
                 mata::nfa::intersection(concatenated_lhs, concatenated_rhs, mata::nfa::EPSILON).trim();
 
-        //! dont care about lang empty for now
-        if (product_pres_eps_trans.is_lang_empty()) {
-            return {};
-        }
 
         product_pres_eps_trans.set_accept_formula(solving_state.accept_formula);
 
         product_pres_eps_trans = mata::nfa::reduce(product_pres_eps_trans);
 
+        // STRACE(str, tout << product_pres_eps_trans.print_to_dot());
+
         //! now I need to go to noodlification and correctly add disjunctions to accept formula + add colors to the states
         mata::nfa::ColorFormula cf;
-        std::vector<mata::nfa::ColorsNfa> color_segments = process_colorful_noodles(solving_state, product_pres_eps_trans, &cf);
+        std::vector<mata::nfa::ColorsNfa> color_segments = mata::applications::strings::seg_nfa::colorful_noodlify(product_pres_eps_trans, &cf, &solving_state.color_counter);
+
+
+        // can always set it to AND because at start it will override True and then wont change anything
+        solving_state.accept_formula.set_operator(mata::nfa::ColorFormula::OperatorType::And);
+        solving_state.accept_formula.add_child(cf);
 
         product_pres_eps_trans.set_accept_formula(solving_state.accept_formula);
+
         STRACE(str, tout << product_pres_eps_trans.print_to_dot());
 
 
         // performing necesarry intersection and moving segments to resulting aut assignment
         ColorAutAssignment eps_product_lang = {};
         for (unsigned ind = 0; ind < lhs_vars.size(); ind++) {
+            STRACE(str, tout << ind << " Colro segments: " << color_segments[ind].print_to_dot() << std::endl);
             BasicTerm left_var = lhs_vars[ind];
             // there is not left var in result language
             if (eps_product_lang.find(left_var) == eps_product_lang.end()) {
@@ -1186,19 +1199,10 @@ namespace smt::noodler {
 
         } 
 
-        STRACE(str, tout << "COLORS printing\n");
-        for (int processed_count = 0; processed_count < init_predicate_size; processed_count++)
-        {
-            Predicate inclusion = process_state.predicates_to_process[processed_count];
-            const auto &lhs_vars = inclusion.get_left_side();
-            const auto &rhs_vars = inclusion.get_right_side();
-            print_product_with_colors(process_state.color_aut_ass, process_state.accept_formula.children[processed_count], process_state, lhs_vars, rhs_vars);
-        }
-
 
         // pushing process state back - think it doesnt depend second argument
-        push_to_worklist(std::move(process_state), false);
-        return l_true;
+        // push_to_worklist(std::move(process_state), false);
+        return process_state.color_aut_ass.is_sat(process_state.accept_formula) ? l_true : l_false;
     }
 
     bool DecisionProcedure::process_inclusion_single_product(Predicate& inclusion, SolvingState& solving_state) {
@@ -1248,8 +1252,8 @@ namespace smt::noodler {
             return false;
         }
 
-        // return solving_state.aut_ass.is_sat();
-        return true;
+        return solving_state.aut_ass.is_sat();
+        // return true;
     }
 
     /**
@@ -1354,9 +1358,9 @@ namespace smt::noodler {
         STRACE(str_noodle_dot, tout << "digraph Procedure {\ninit[shape=none, label=\"\"]\n";);
         push_to_worklist(std::move(init_solving_state), true);
 
-        // temporary place for single product heuristic
-        // this version call product heuristic one step at time from noodlification step
-        single_product_heuristic();
+        // // temporary place for single product heuristic
+        // // this version call product heuristic one step at time from noodlification step
+        // single_product_heuristic();
     }
 
     lbool DecisionProcedure::preprocess(PreprocessType opt, const BasicTermEqiv &len_eq_vars) {

@@ -344,7 +344,8 @@ namespace smt::noodler {
 
         while (true) {
             util::check_limit(m);
-            auto [result, some_skipped] = main_dec_proc->compute_next_solution_with_len_checks(check_lens);
+            // auto [result, some_skipped] = main_dec_proc->compute_next_solution_with_len_checks(check_lens);
+            auto [result, some_skipped] = main_dec_proc->compute_next_solution_colorful();
             if (result == l_true) {
                 auto [is_lengths_sat, precision] = check_lens_with_precision();
 

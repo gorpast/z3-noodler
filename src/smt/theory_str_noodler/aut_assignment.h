@@ -430,7 +430,6 @@ namespace smt::noodler {
 
                 for (auto pair: aut_ass) {
                     (*this)[pair.first] = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::ColorsNfa(*(pair.second), mata::nfa::ColorFormula()));
-                    STRACE(str, tout << (*(*this)[pair.first]).num_of_states() << "im here\n");
                 }
             }
 
@@ -450,6 +449,14 @@ namespace smt::noodler {
                 return ret;
             }
 
+            mata::nfa::ColorsNfa get_full_automaton_concat() const {
+                mata::nfa::ColorsNfa ret = mata::nfa::ColorsNfa(mata::nfa::builder::create_empty_string_nfa() , mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::True));
+                for(auto pair: *this) {
+                    ret.concatenate(*pair.second);  // fails when not found
+                }
+                return ret;
+            }
+
             void restrict_lang(const BasicTerm& t, const mata::nfa::ColorsNfa& restr_nfa) {
                 (*this)[t] = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::intersection(restr_nfa, *this->at(t)));
             }
@@ -458,16 +465,22 @@ namespace smt::noodler {
              * @brief Reduce all automata occurring in the map.
              */
             void reduce() {
-                STRACE(str, tout<< "Reducing\n");
                 for (auto& pr : *this) {
-                    STRACE(str, tout << "im not done " << pr.first<<"\n" << (*pr.second).print_to_dot());
                     pr.second = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::reduce(*pr.second));
-                    STRACE(str, tout << "im done\n" << (*pr.second).print_to_dot());
                 }
             }
             // //! why tf am I putting this right there
             // ColorAutAssignment create_color_assignment(AutAssignment aut_ass) {
             // }
+
+            bool is_sat(mata::nfa::ColorFormula full_formula) {
+                mata::nfa::ColorsNfa full_concat = this->get_full_automaton_concat();
+
+                full_concat.set_accept_formula(full_formula);
+                STRACE(str, tout << full_concat.print_to_dot());
+
+                return full_concat.is_lang_empty();
+            }
 
     };
 

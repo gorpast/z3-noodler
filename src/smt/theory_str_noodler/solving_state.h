@@ -27,7 +27,7 @@ namespace smt::noodler {
         // substituted in substitution_map, but not both!
         AutAssignment aut_ass;
         ColorAutAssignment color_aut_ass;
-        mata::nfa::ColorFormula accept_formula = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::And); // now invalid cause And doesnt have child
+        mata::nfa::ColorFormula accept_formula = mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::True); // now invalid cause And doesnt have child
         int color_counter = 0;
 
         std::unordered_map<BasicTerm, std::vector<BasicTerm>> substitution_map;

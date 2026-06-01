@@ -432,6 +432,9 @@ namespace smt::noodler {
             std::function<lbool(bool)> check_lens
         );
 
+        std::pair<lbool, bool> compute_next_solution_colorful();
+
+
         LenNode get_initial_lengths(bool all_vars = false) override;
 
         std::pair<LenNode, LenNodePrecision> get_lengths() override;
