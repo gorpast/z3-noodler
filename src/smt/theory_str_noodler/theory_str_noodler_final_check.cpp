@@ -342,10 +342,24 @@ namespace smt::noodler {
             }
         };
 
+        bool xxx = main_dec_proc->can_use_single_product_heuristic();
+
         while (true) {
             util::check_limit(m);
-            // auto [result, some_skipped] = main_dec_proc->compute_next_solution_with_len_checks(check_lens);
-            auto [result, some_skipped] = main_dec_proc->compute_next_solution_colorful();
+
+            lbool result;
+            bool some_skipped;
+            if (xxx) {
+                STRACE(str, tout << "My heuristic can change the solution\n");
+                auto pair = main_dec_proc->compute_next_solution_colorful();
+                result = pair.first;
+                some_skipped = pair.second;
+            } else {
+                auto pair = main_dec_proc->compute_next_solution_with_len_checks(check_lens);
+                result = pair.first;
+                some_skipped = pair.second;
+            }
+
             if (result == l_true) {
                 auto [is_lengths_sat, precision] = check_lens_with_precision();
 

@@ -434,6 +434,8 @@ namespace smt::noodler {
 
         std::pair<lbool, bool> compute_next_solution_colorful();
 
+        bool can_use_single_product_heuristic();
+
 
         LenNode get_initial_lengths(bool all_vars = false) override;
 

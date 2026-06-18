@@ -438,27 +438,27 @@ namespace smt::noodler {
                 for(const BasicTerm& t : concat) {
                     if (this->find(t) == this->end()) {
                         mata::nfa::ColorsNfa non_color = mata::nfa::ColorsNfa(*reference_aut.at(t), mata::nfa::ColorFormula());
-                        ret.concatenate(non_color);  // fails when not found
+                        // ret.concatenate(non_color);  // fails when not found
+                        ret = mata::nfa::concatenate(ret, non_color, mata::nfa::EPSILON - 1); // TODO I need to concatenate with epsilon because basic concat just doesnt work
                     } else {
                         // TODO I want it to run at least somehow so I will set vars not in colors_aut_ass to non color version of aut assignment
-                        // STRACE(str, tout << "im at: " << t << "\n");
-                        // STRACE(str, tout << (*(this->at(t))).print_to_dot());
-                        ret.concatenate(*(this->at(t)));  // fails when not found
+                        // ret.concatenate(*(this->at(t)));  // fails when not found
+                        ret = mata::nfa::concatenate(ret, *(this->at(t)), mata::nfa::EPSILON - 1); // TODO I need to concatenate with epsilon because basic concat just doesnt work
                     }
                 }
                 return ret;
             }
 
             mata::nfa::ColorsNfa get_full_automaton_concat() const {
-                mata::nfa::ColorsNfa ret = mata::nfa::ColorsNfa(mata::nfa::builder::create_empty_string_nfa() , mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::True));
+                mata::nfa::ColorsNfa ret = mata::nfa::ColorsNfa(mata::nfa::builder::create_empty_string_nfa(), mata::nfa::ColorFormula(mata::nfa::ColorFormula::OperatorType::True));
                 for(auto pair: *this) {
-                    ret.concatenate(*pair.second);  // fails when not found
+                    ret = mata::nfa::concatenate(ret, *pair.second, mata::nfa::EPSILON - 1); // TODO I need to concatenate with epsilon because basic concat just doesnt work
                 }
                 return ret;
             }
 
             void restrict_lang(const BasicTerm& t, const mata::nfa::ColorsNfa& restr_nfa) {
-                (*this)[t] = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::intersection(restr_nfa, *this->at(t)));
+                (*this)[t] = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::intersection(restr_nfa, *this->at(t), mata::nfa::EPSILON - 1)); // TODO need to be same as in concatenation
             }
 
             /**
@@ -477,7 +477,7 @@ namespace smt::noodler {
                 mata::nfa::ColorsNfa full_concat = this->get_full_automaton_concat();
 
                 full_concat.set_accept_formula(full_formula);
-                STRACE(str, tout << full_concat.print_to_dot());
+                STRACE(str, tout << "Full concat\n" << full_concat.print_to_dot() << std::endl);
 
                 return full_concat.is_lang_empty();
             }

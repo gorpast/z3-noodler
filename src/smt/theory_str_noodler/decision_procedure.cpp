@@ -1110,23 +1110,25 @@ namespace smt::noodler {
         STRACE(str, tout << "epsilon concatenation\n");
         // concatenation of lhs using epsilon transition - these transition will then be removed during segmatation
         mata::nfa::ColorsNfa concatenated_lhs = epsilon_concatenation(lhs_automata);
+        STRACE(str, tout << "lhs:\n" << concatenated_lhs.print_to_dot());
 
 
         // ordinary concatenation of right hand side
         STRACE(str, tout << "normal concatenation\n");
         mata::nfa::ColorsNfa concatenated_rhs = solving_state.color_aut_ass.get_automaton_concat(rhs_vars, solving_state.aut_ass);
+        STRACE(str, tout << "rhs:\n" << concatenated_rhs.print_to_dot());
 
 
         STRACE(str, tout << "okay so there is product intersection\n" << solving_state.accept_formula.print_formula() << std::endl);
         mata::nfa::ColorsNfa product_pres_eps_trans = 
-                mata::nfa::intersection(concatenated_lhs, concatenated_rhs, mata::nfa::EPSILON).trim();
+                mata::nfa::intersection(concatenated_lhs, concatenated_rhs, mata::nfa::EPSILON - 1).trim();
 
 
         product_pres_eps_trans.set_accept_formula(solving_state.accept_formula);
 
         product_pres_eps_trans = mata::nfa::reduce(product_pres_eps_trans);
 
-        // STRACE(str, tout << product_pres_eps_trans.print_to_dot());
+        STRACE(str, tout << "before color noodlify\n" << product_pres_eps_trans.print_to_dot());
 
         //! now I need to go to noodlification and correctly add disjunctions to accept formula + add colors to the states
         mata::nfa::ColorFormula cf;
@@ -1153,6 +1155,7 @@ namespace smt::noodler {
             } else {
                 eps_product_lang.restrict_lang(left_var, color_segments[ind]);
             }
+            eps_product_lang[left_var] = std::make_shared<mata::nfa::ColorsNfa>(mata::nfa::remove_epsilon_color(*eps_product_lang[left_var], mata::nfa::EPSILON -1));
             STRACE(str, tout << left_var << " megafsfbvcad cool var\n" << (*eps_product_lang[left_var]).print_to_dot());
         }
 
@@ -1241,6 +1244,7 @@ namespace smt::noodler {
         for (const auto &x : solving_state.color_aut_ass) {
 
             solving_state.color_aut_ass[x.first] = std::make_shared<mata::nfa::ColorsNfa>((*x.second).trim());
+            STRACE(str, tout << x.first << " AAA " << (*x.second).print_to_dot() << std::endl);
         }
 
         // another reduction - don't know if necesarry
@@ -1252,8 +1256,46 @@ namespace smt::noodler {
             return false;
         }
 
-        return solving_state.aut_ass.is_sat();
-        // return true;
+        return solving_state.color_aut_ass.is_sat(solving_state.accept_formula);
+    }
+
+    bool DecisionProcedure::can_use_single_product_heuristic() {
+        //! my current heuristic cannot work with transducers or length constraints
+        if (worklist.empty()) {
+            return false;
+        }
+        SolvingState process_state = worklist.front();
+
+        int init_predicate_size = process_state.predicates_to_process.size();
+
+        //! How to behave when there is no predicate
+        if (init_predicate_size == 0) {
+            // push_to_worklist(std::move(process_state), false);
+            return false;
+        }
+
+        for (int processed_count = 0; processed_count < init_predicate_size; processed_count++)
+        {
+            Predicate predicate_to_process = process_state.predicates_to_process[processed_count];
+
+            if (!predicate_to_process.is_equation()) {
+                // push_to_worklist(std::move(process_state), false);
+                return false;
+            }
+
+            const auto &left_side_vars = predicate_to_process.get_left_side();
+            const auto &right_side_vars = predicate_to_process.get_right_side();
+            // inclusion contains length aware variables can't od anything
+            if (process_state.contains_length_var(right_side_vars) || process_state.contains_length_var(left_side_vars)) {
+                // push_to_worklist(std::move(process_state), false);
+                return false;
+            }
+
+
+        }
+
+        // push_to_worklist(std::move(process_state), false);
+        return true;
     }
 
     /**
